@@ -29,17 +29,16 @@ public class SecurityConfig {
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        // 👇👇 [핵심] 허용할 주소들은 anyRequest()보다 무조건 '위에' 있어야 합니다!
+                        // 허용할 주소들은 anyRequest()보다 무조건 위에 있어야 함
                         .requestMatchers(
                                 "/api/auth/**",
-                                "/api/products/**", // (선택) 상품 목록 조회도 로그인 없이 보게 하려면 여기 추가
+                                "/api/products/**",
                                 "/error",
                                 "/swagger-ui/**",
                                 "/swagger-ui.html",
                                 "/v3/api-docs/**")
                         .permitAll()
 
-                        // 👇👇 나머지는 다 막는다 (무조건 맨 마지막!)
                         .anyRequest().authenticated())
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 

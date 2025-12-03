@@ -5,12 +5,12 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
-@RestControllerAdvice // ⭐ 모든 컨트롤러에서 발생하는 에러를 여기서 잡겠다!
+@RestControllerAdvice // 모든 컨트롤러에서 발생하는 에러
 public class GlobalExceptionHandler {
 
-    // 1. 비즈니스 로직 에러 (RuntimeException) 처리
+    // 비즈니스 로직 에러 (RuntimeException) 처리
     // 예: "상품이 없습니다", "구매자가 아닙니다", "중복 리뷰입니다" 등
-    // 우리가 throw new RuntimeException("메시지") 한 것들이 다 여기로 옴
+    // throw new RuntimeException("메시지") 한 것들이 다 여기로 옴
     @ExceptionHandler(RuntimeException.class)
     public ResponseEntity<ErrorResponse> handleRuntimeException(RuntimeException e) {
         // 500 에러 대신 -> 400 Bad Request로 바꿔서 리턴

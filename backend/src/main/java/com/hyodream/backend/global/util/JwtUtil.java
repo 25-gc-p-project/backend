@@ -19,12 +19,12 @@ public class JwtUtil {
     private final long ACCESS_TIME = 30 * 60 * 1000L; // 30분
     private final long REFRESH_TIME = 7 * 24 * 60 * 60 * 1000L; // 7일
 
-    // 1. Access Token 생성 (짧은 거)
+    // Access Token 생성 (짧은 거)
     public String createAccessToken(String username) {
         return createToken(username, ACCESS_TIME);
     }
 
-    // 2. Refresh Token 생성 (긴 거)
+    // Refresh Token 생성 (긴 거)
     public String createRefreshToken(String username) {
         return createToken(username, REFRESH_TIME);
     }
@@ -39,7 +39,7 @@ public class JwtUtil {
                 .compact();
     }
 
-    // 3. 토큰에서 아이디 꺼내기
+    // 토큰에서 아이디 꺼내기
     public String getUsername(String token) {
         return Jwts.parserBuilder().setSigningKey(key).build()
                 .parseClaimsJws(token)
@@ -47,7 +47,7 @@ public class JwtUtil {
                 .getSubject();
     }
 
-    // 4. 토큰 유효성 검사
+    // 토큰 유효성 검사
     public boolean validateToken(String token) {
         try {
             Jwts.parserBuilder().setSigningKey(key).build().parseClaimsJws(token);

@@ -17,26 +17,26 @@ public class ProductController {
 
     private final ProductService productService;
 
-    // 1. 상품 등록 (관리자용 - 일단 누구나 쓸 수 있게 열어둠 or 토큰 필요)
+    // 상품 등록 (관리자용 - 일단 누구나 쓸 수 있게 열어둠 or 토큰 필요)
     @PostMapping
     public ResponseEntity<String> createProduct(@RequestBody ProductRequestDto dto) {
         productService.createProduct(dto);
         return ResponseEntity.ok("상품 등록 완료!");
     }
 
-    // 2. 전체 목록 조회
+    // 전체 목록 조회
     @GetMapping
     public ResponseEntity<List<ProductResponseDto>> getAllProducts() {
         return ResponseEntity.ok(productService.getAllProducts());
     }
 
-    // 3. 상세 조회
+    // 상세 조회
     @GetMapping("/{id}")
     public ResponseEntity<ProductResponseDto> getProduct(@PathVariable Long id) {
         return ResponseEntity.ok(productService.getProduct(id));
     }
 
-    // 4. AI 맞춤 추천 상품 조회 (New!)
+    // AI 맞춤 추천 상품 조회
     // GET http://localhost:8080/api/products/recommend
     // 헤더: Authorization: Bearer {토큰}
     @GetMapping("/recommend")
@@ -46,5 +46,12 @@ public class ProductController {
         // 서비스에서 AI한테 물어보고 결과 받아오기
         List<ProductResponseDto> recommendations = productService.getRecommendedProducts(authentication.getName());
         return ResponseEntity.ok(recommendations);
+    }
+
+    // 상품 검색 API
+    // GET http://localhost:8080/api/products/search?keyword=관절
+    @GetMapping("/search")
+    public ResponseEntity<List<ProductResponseDto>> searchProducts(@RequestParam("keyword") String keyword) {
+        return ResponseEntity.ok(productService.searchProducts(keyword));
     }
 }

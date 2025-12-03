@@ -26,7 +26,7 @@ public class OrderService {
     private final UserRepository userRepository;
     private final ProductRepository productRepository;
 
-    // 1. 주문 생성
+    // 주문 생성
     @Transactional
     public Long order(String username, List<OrderRequestDto> itemDtos) {
         User user = userRepository.findByUsername(username)
@@ -50,7 +50,7 @@ public class OrderService {
         return order.getId();
     }
 
-    // 2. 내 주문 내역 조회
+    // 내 주문 내역 조회
     @Transactional(readOnly = true)
     public List<OrderResponseDto> getMyOrders(String username) {
         User user = userRepository.findByUsername(username)
@@ -74,10 +74,10 @@ public class OrderService {
             dtos.add(new OrderResponseDto(order, itemDtos));
         }
 
-        return dtos; // 👈 질문하신 부분: 조회 기능은 여기서 끝납니다.
-    } // 👈 이 괄호 밖으로 나가야 합니다!
+        return dtos; // 조회 기능 끝
+    }
 
-    // 3. 주문 취소 (New! 여기에 추가)
+    // 주문 취소
     @Transactional
     public void cancelOrder(Long orderId, String username) {
         Order order = orderRepository.findById(orderId)

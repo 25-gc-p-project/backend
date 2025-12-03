@@ -23,7 +23,7 @@ repositories {
 	mavenCentral()
 }
 
-// 1. 스프링 클라우드 버전 변수 설정
+// 스프링 클라우드 버전 변수 설정
 ext {
 	set('springCloudVersion', "2024.0.0")
 }

@@ -32,7 +32,7 @@ public class UserService {
         User user = userRepository.findByUsername(username)
                 .orElseThrow(() -> new RuntimeException("사용자를 찾을 수 없습니다."));
 
-        // 1. 지병 처리
+        // 지병 처리
         user.getDiseases().clear();
         if (dto.getDiseaseNames() != null) {
             for (String name : dto.getDiseaseNames()) {
@@ -42,7 +42,7 @@ public class UserService {
             }
         }
 
-        // 2. 알레르기 처리
+        // 알레르기 처리
         user.getAllergies().clear();
         if (dto.getAllergyNames() != null) {
             for (String name : dto.getAllergyNames()) {
@@ -52,7 +52,7 @@ public class UserService {
             }
         }
 
-        // 3. 기대효과 처리
+        // 기대효과 처리
         user.getHealthGoals().clear();
         if (dto.getHealthGoalNames() != null) {
             for (String name : dto.getHealthGoalNames()) {

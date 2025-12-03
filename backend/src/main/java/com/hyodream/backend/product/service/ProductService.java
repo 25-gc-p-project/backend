@@ -24,10 +24,9 @@ public class ProductService {
     private final ProductRepository productRepository;
     private final AiClient aiClient;
 
-    // 👇👇 [추가] 이거 없어서 "userRepository cannot be resolved" 에러 난 겁니다!
     private final UserRepository userRepository;
 
-    // 1. 상품 등록 (관리자용 - 나중에 쿠팡 API로 대체될 부분)
+    // 상품 등록 (관리자용 - 나중에 쿠팡 API로 대체될 부분)
     @Transactional
     public void createProduct(ProductRequestDto dto) {
         Product product = new Product();
@@ -48,7 +47,7 @@ public class ProductService {
         productRepository.save(product);
     }
 
-    // 2. 전체 상품 목록 조회 (사용자용)
+    // 전체 상품 목록 조회 (사용자용)
     @Transactional(readOnly = true)
     public List<ProductResponseDto> getAllProducts() {
         return productRepository.findAll().stream()
@@ -56,7 +55,7 @@ public class ProductService {
                 .collect(Collectors.toList());
     }
 
-    // 3. 상품 상세 조회 (ID로 찾기)
+    // 상품 상세 조회 (ID로 찾기)
     @Transactional(readOnly = true)
     public ProductResponseDto getProduct(Long id) {
         Product product = productRepository.findById(id)
@@ -67,21 +66,39 @@ public class ProductService {
     // AI 추천 로직 추가
     @Transactional(readOnly = true)
     public List<ProductResponseDto> getRecommendedProducts(String username) {
-        // 1. 사용자 정보 가져오기
+        // 사용자 정보 가져오기
         User user = userRepository.findByUsername(username)
                 .orElseThrow(() -> new RuntimeException("사용자 없음"));
 
-        // 2. AI에게 보낼 데이터 만들기 (User 엔티티 -> DTO 변환)
-        // (간단하게 구현: 지병 이름 리스트만 뽑아서 보낸다고 가정)
+        // AI에게 보낼 데이터 만들기 (User 엔티티 -> DTO 변환)
         HealthInfoRequestDto requestDto = new HealthInfoRequestDto();
-        requestDto.setDiseaseNames(user.getDiseases().stream().map(ud -> ud.getDisease().getName()).toList());
-        // ... 알러지 등도 필요하면 추가
+        // 지병 목록 변환
+        requestDto.setDiseaseNames(user.getDiseases().stream()
+                .map(ud -> ud.getDisease().getName()).toList());
+        // 알레르기 목록 변환
+        requestDto.setAllergyNames(user.getAllergies().stream()
+                .map(ua -> ua.getAllergy().getName()).toList());
 
-        // 3. AI 서버 호출 (ID 리스트 받음)
+        // 기대효과 목록 변환
+        requestDto.setHealthGoalNames(user.getHealthGoals().stream()
+                .map(uh -> uh.getHealthGoal().getName()).toList());
+
+        // AI 서버 호출 (ID 리스트 받음)
         List<Long> productIds = aiClient.getRecommendations(requestDto);
 
-        // 4. 받아온 ID로 우리 DB에서 상품 조회
+        // 받아온 ID로 우리 DB에서 상품 조회
         List<Product> products = productRepository.findAllById(productIds);
+
+        return products.stream()
+                .map(ProductResponseDto::new)
+                .collect(Collectors.toList());
+    }
+
+    // 상품 검색 기능 (이름으로 찾기)
+    @Transactional(readOnly = true)
+    public List<ProductResponseDto> searchProducts(String keyword) {
+        // Repository에 메서드 추가 필요
+        List<Product> products = productRepository.findByNameContaining(keyword);
 
         return products.stream()
                 .map(ProductResponseDto::new)

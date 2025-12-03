@@ -1,12 +1,12 @@
 package com.hyodream.backend.user.controller;
 
-import com.hyodream.backend.auth.dto.SignupRequestDto; // 수정용 DTO
-import com.hyodream.backend.user.domain.User; // 👈 에러 해결: import 추가
+import com.hyodream.backend.auth.dto.SignupRequestDto;
+import com.hyodream.backend.user.domain.User;
 import com.hyodream.backend.user.dto.HealthInfoRequestDto;
 import com.hyodream.backend.user.service.UserService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.core.Authentication; // 👈 에러 해결: import 추가
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 @RestController

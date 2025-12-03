@@ -21,10 +21,10 @@ public class Review {
     @Column(name = "product_id", nullable = false)
     private Long productId;
 
-    @Column(columnDefinition = "TEXT", nullable = true) // 👈 내용 작성은 선택 (null 허용)
+    @Column(columnDefinition = "TEXT", nullable = true) // 내용 작성은 선택 (null 허용)
     private String content;
 
-    @Enumerated(EnumType.STRING) // 👈 숫자가 아니라 문자열("GOOD")로 저장
+    @Enumerated(EnumType.STRING) // 숫자가 아니라 문자열("GOOD")로 저장
     private ReviewRating rating;
 
     private LocalDateTime createdAt;

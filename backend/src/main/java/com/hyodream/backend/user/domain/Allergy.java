@@ -13,5 +13,5 @@ public class Allergy {
     private Long id;
 
     @Column(unique = true)
-    private String name; // 예: "땅콩", "우유", "갑각류"
+    private String name; // 예: "견과류", "우유", "갑각류"
 }

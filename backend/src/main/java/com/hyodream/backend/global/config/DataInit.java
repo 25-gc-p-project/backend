@@ -16,22 +16,22 @@ import org.springframework.stereotype.Component;
 public class DataInit implements CommandLineRunner {
 
     private final DiseaseRepository diseaseRepository;
-    private final AllergyRepository allergyRepository; // 추가
-    private final HealthGoalRepository healthGoalRepository; // 추가
+    private final AllergyRepository allergyRepository;
+    private final HealthGoalRepository healthGoalRepository;
 
     @Override
     public void run(String... args) throws Exception {
-        // 1. 지병
+        // 지병
         String[] diseases = { "당뇨", "고혈압", "신장질환", "고지혈증", "골다공증", "백내장", "관절염" };
         for (String name : diseases) {
-            // ⭐ 핵심: "DB에 이 이름이 없으면" 저장해라!
+            // DB에 이 이름이 없으면 저장
             if (diseaseRepository.findByName(name).isEmpty()) {
                 Disease d = new Disease();
                 d.setName(name);
                 diseaseRepository.save(d);
             }
         }
-        // 2. 알레르기
+        // 알레르기
         String[] allergies = { "견과류", "우유", "달걀", "대두", "밀", "생선", "갑각류" };
         for (String name : allergies) {
             if (allergyRepository.findByName(name).isEmpty()) {
@@ -41,7 +41,7 @@ public class DataInit implements CommandLineRunner {
             }
         }
 
-        // 3. 기대효과
+        // 기대효과
         String[] goals = { "면역력 강화", "피로 회복", "관절/뼈 건강", "눈 건강", "기억력 개선", "혈행 개선", "장 건강" };
         for (String name : goals) {
             if (healthGoalRepository.findByName(name).isEmpty()) {

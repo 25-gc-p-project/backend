@@ -17,7 +17,7 @@ public class User {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    // 1) 로그인/회원가입 정보
+    // 로그인/회원가입 정보
     @Column(nullable = false, unique = true)
     private String username; // 아이디 (로그인용)
 
@@ -27,7 +27,7 @@ public class User {
     @Column(nullable = false)
     private String name; // 실명
 
-    // 2) 개인 신상 정보
+    // 개인 신상 정보
     private String phone; // 전화번호
 
     private LocalDate birthDate; // 생년월일 (나이 계산 및 추천 알고리즘에 필수)
@@ -35,16 +35,16 @@ public class User {
     @Embedded // 아까 만든 Address 클래스를 여기에 쏙 넣음
     private Address address;
 
-    // 3) 마이페이지 - 지병/필터링 정보 (UserDisease와 1:N 관계)
+    // 마이페이지 - 지병/필터링 정보 (UserDisease와 1:N 관계)
     // "cascade = CascadeType.ALL" -> 유저 탈퇴하면 지병 정보도 같이 삭제됨
     @OneToMany(mappedBy = "user", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<UserDisease> diseases = new ArrayList<>();
 
-    // 2. 알레르기 (추가)
+    // 알레르기
     @OneToMany(mappedBy = "user", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<UserAllergy> allergies = new ArrayList<>();
 
-    // 3. 기대효과 (추가)
+    // 기대효과
     @OneToMany(mappedBy = "user", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<UserHealthGoal> healthGoals = new ArrayList<>();
 

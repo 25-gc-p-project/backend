@@ -34,7 +34,7 @@ public class OrderController {
         return ResponseEntity.ok(orderService.getMyOrders(authentication.getName()));
     }
 
-    // 2. 주문 취소
+    // 주문 취소
     // POST http://localhost:8080/api/orders/{orderId}/cancel
     @PostMapping("/{orderId}/cancel")
     public ResponseEntity<String> cancelOrder(

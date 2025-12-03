@@ -31,7 +31,7 @@ public class Product {
     private String volume; // 용량 (예: 120정)
     private String sizeInfo; // 알약 크기
 
-    // ⭐ 이 상품의 효능 (AI 추천용 태그)
+    // 이 상품의 효능 (AI 추천용 태그)
     // "관절", "당뇨" 같은 단순 문자열 리스트이므로 ElementCollection 사용
     // 별도 테이블(product_benefits)로 저장되지만, Product랑 한 몸 취급 (LifeCycle 같음)
     @ElementCollection(fetch = FetchType.EAGER)

@@ -55,7 +55,7 @@ public class ReviewService {
         reviewRepository.save(review);
     }
 
-    // 2. 상품별 리뷰 조회 (MSA 대비 리팩토링)
+    // 상품별 리뷰 조회 (MSA 대비 리팩토링)
     @Transactional(readOnly = true)
     public List<ReviewResponseDto> getReviewsByProductId(Long productId) {
         List<Review> reviews = reviewRepository.findByProductId(productId);
@@ -73,7 +73,7 @@ public class ReviewService {
         return dtos;
     }
 
-    // 3. 리뷰 수정 (New!)
+    // 리뷰 수정
     @Transactional
     public void updateReview(Long reviewId, String username, ReviewRequestDto dto) {
         Review review = reviewRepository.findById(reviewId)
@@ -92,7 +92,7 @@ public class ReviewService {
         // (JPA 변경 감지로 자동 저장됨)
     }
 
-    // 4. 리뷰 삭제 (New!)
+    // 리뷰 삭제
     @Transactional
     public void deleteReview(Long reviewId, String username) {
         Review review = reviewRepository.findById(reviewId)
@@ -108,17 +108,17 @@ public class ReviewService {
         reviewRepository.delete(review);
     }
 
-    // 5. 내가 쓴 리뷰 조회 (New!)
+    // 내가 쓴 리뷰 조회
     @Transactional(readOnly = true)
     public List<ReviewResponseDto> getMyReviews(String username) {
-        // 1. 사용자 찾기 (username -> userId)
+        // 사용자 찾기 (username -> userId)
         User user = userRepository.findByUsername(username)
                 .orElseThrow(() -> new RuntimeException("사용자 없음"));
 
-        // 2. 리뷰 목록 조회
+        // 리뷰 목록 조회
         List<Review> reviews = reviewRepository.findByUserId(user.getId());
 
-        // 3. 상품 이름 채워 넣기 (MSA 방식: ID로 상품 조회)
+        // 상품 이름 채워 넣기 (MSA 방식: ID로 상품 조회)
         List<ReviewResponseDto> dtos = new ArrayList<>();
 
         for (Review review : reviews) {
