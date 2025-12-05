@@ -17,8 +17,11 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.data.redis.core.StringRedisTemplate;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
@@ -29,6 +32,7 @@ public class ProductService {
     private final AiClient aiClient;
 
     private final UserRepository userRepository;
+    private final StringRedisTemplate redisTemplate;
 
     // 상품 등록 (관리자용 - 나중에 쿠팡 API로 대체될 부분)
     @Transactional
@@ -48,18 +52,52 @@ public class ProductService {
             }
         }
 
+        // 알레르기 정보 저장 로직
+        if (dto.getAllergens() != null) {
+            for (String allergen : dto.getAllergens()) {
+                product.addAllergen(allergen); // 엔티티에 만들어둔 메서드 호출
+            }
+        }
+
         productRepository.save(product);
     }
 
-    // 전체 상품 목록 조회 (사용자용)
+    // 전체 상품 목록 조회 (실시간 관심사 반영 정렬)
     @Transactional(readOnly = true)
-    public Page<ProductResponseDto> getAllProducts(int page, int size) {
-        // 페이지 만들기: page번 페이지, size개씩, id 내림차순(최신순) 정렬
-        Pageable pageable = PageRequest.of(page, size, Sort.by("id").descending());
+    public Page<ProductResponseDto> getAllProducts(int page, int size, String identifier) {
+        Pageable pageable = PageRequest.of(page, size); // 정렬 조건은 쿼리에서 직접 하므로 여기선 뺌
 
-        // findAll(pageable)을 호출하면 알아서 Page 객체를 줍니다.
-        return productRepository.findAll(pageable)
-                .map(ProductResponseDto::new); // 엔티티 -> DTO 변환도 map으로 한 방에!
+        // A. 변수 초기화
+        boolean isLogin = false;
+        List<String> userAllergies = new ArrayList<>(); // 알레르기 목록
+        String interestCategory = ""; // 관심사 (없으면 빈 문자열)
+
+        // B. 유저 정보 및 관심사 추출
+        if (identifier != null && !identifier.equals("unknown")) {
+            // 1. 로그인 유저 확인 (identifier가 username인 경우)
+            // (컨트롤러에서 명확히 구분해서 넘겨주면 좋지만, 일단 DB 조회 시도)
+            userRepository.findByUsername(identifier).ifPresent(user -> {
+                // 알레르기 목록 채우기
+                user.getAllergies().forEach(ua -> userAllergies.add(ua.getAllergy().getName()));
+            });
+            if (!userAllergies.isEmpty())
+                isLogin = true;
+
+            // 2. Redis 실시간 관심사 확인
+            String redisKey = "interest:user:" + identifier;
+            Set<String> topInterests = redisTemplate.opsForZSet().reverseRange(redisKey, 0, 0);
+            if (topInterests != null && !topInterests.isEmpty()) {
+                interestCategory = topInterests.iterator().next();
+            }
+        }
+
+        // C. 쿼리 실행 (DB가 알아서 정렬하고 필터링해서 Page로 줌)
+        // (알레르기가 없으면 빈 리스트를 넘겨야 에러 안 남)
+        if (userAllergies.isEmpty())
+            userAllergies.add("NONE");
+
+        return productRepository.findAllWithPersonalization(isLogin, userAllergies, interestCategory, pageable)
+                .map(ProductResponseDto::new);
     }
 
     // 상품 상세 조회 (ID로 찾기)
@@ -70,33 +108,48 @@ public class ProductService {
         return new ProductResponseDto(product);
     }
 
-    // AI 추천 로직 추가
+    // AI + 실시간 하이브리드 추천 (로그인 유저 전용)
     @Transactional(readOnly = true)
     public List<ProductResponseDto> getRecommendedProducts(String username) {
-        // 사용자 정보 가져오기
-        User user = userRepository.findByUsername(username)
-                .orElseThrow(() -> new RuntimeException("사용자 없음"));
+        List<Product> finalProducts = new ArrayList<>();
 
-        // AI에게 보낼 데이터 만들기 (User 엔티티 -> DTO 변환)
-        HealthInfoRequestDto requestDto = new HealthInfoRequestDto();
-        // 지병 목록 변환
-        requestDto.setDiseaseNames(user.getDiseases().stream()
-                .map(ud -> ud.getDisease().getName()).toList());
-        // 알레르기 목록 변환
-        requestDto.setAllergyNames(user.getAllergies().stream()
-                .map(ua -> ua.getAllergy().getName()).toList());
+        // [A] 실시간 행동 기반 추천 (Short-term Interest)
+        // 로그인 유저니까 식별자로 username을 사용
+        String redisKey = "interest:user:" + username;
+        Set<String> topInterests = redisTemplate.opsForZSet().reverseRange(redisKey, 0, 0);
 
-        // 기대효과 목록 변환
-        requestDto.setHealthGoalNames(user.getHealthGoals().stream()
-                .map(uh -> uh.getHealthGoal().getName()).toList());
+        if (topInterests != null && !topInterests.isEmpty()) {
+            String hotCategory = topInterests.iterator().next();
+            // 해당 태그 상품 3개 가져오기
+            List<Product> realTimePicks = productRepository.findByHealthBenefitsContaining(hotCategory);
+            if (realTimePicks.size() > 3)
+                realTimePicks = realTimePicks.subList(0, 3);
+            finalProducts.addAll(realTimePicks);
+        }
 
-        // AI 서버 호출 (ID 리스트 받음)
-        List<Long> productIds = aiClient.getRecommendations(requestDto);
+        // 2. [AI] 기존 AI 추천 로직
+        try {
+            User user = userRepository.findByUsername(username)
+                    .orElseThrow(() -> new RuntimeException("사용자 없음"));
 
-        // 받아온 ID로 우리 DB에서 상품 조회
-        List<Product> products = productRepository.findAllById(productIds);
+            HealthInfoRequestDto requestDto = new HealthInfoRequestDto();
+            requestDto.setDiseaseNames(user.getDiseases().stream().map(ud -> ud.getDisease().getName()).toList());
+            requestDto.setAllergyNames(user.getAllergies().stream().map(ua -> ua.getAllergy().getName()).toList());
+            requestDto.setHealthGoalNames(
+                    user.getHealthGoals().stream().map(uh -> uh.getHealthGoal().getName()).toList());
 
-        return products.stream()
+            List<Long> aiProductIds = aiClient.getRecommendations(requestDto);
+            List<Product> aiProducts = productRepository.findAllById(aiProductIds);
+
+            finalProducts.addAll(aiProducts); // AI 결과 뒤에 붙이기
+        } catch (Exception e) {
+            // Fallback: AI 서버가 죽어도 여기서 멈추지 않고, 위에서 담은 [실시간 추천]만이라도 리턴함
+            System.out.println("AI 서버 연결 실패 (Fallback 작동): " + e.getMessage());
+        }
+
+        // 3. 중복 제거 (혹시 AI랑 실시간이랑 겹칠 수 있으니)
+        return finalProducts.stream()
+                .distinct()
                 .map(ProductResponseDto::new)
                 .collect(Collectors.toList());
     }

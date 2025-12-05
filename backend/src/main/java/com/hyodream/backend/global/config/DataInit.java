@@ -32,7 +32,7 @@ public class DataInit implements CommandLineRunner {
             }
         }
         // 알레르기
-        String[] allergies = { "견과류", "우유", "달걀", "대두", "밀", "생선", "갑각류" };
+        String[] allergies = { "땅콩", "우유", "달걀", "대두", "밀가루", "생선", "갑각류" };
         for (String name : allergies) {
             if (allergyRepository.findByName(name).isEmpty()) {
                 Allergy a = new Allergy();

@@ -13,5 +13,8 @@ public class ProductRequestDto {
     private String imageUrl; // 이미지 URL
     private String volume; // 용량
     private String sizeInfo; // 크기
+
     private List<String> healthBenefits; // 효능 태그 (예: ["관절", "당뇨"])
+    private List<String> allergens; // 알레르기 유발 성분 (예: ["땅콩", "우유"])
+
 }

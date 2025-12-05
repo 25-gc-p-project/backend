@@ -39,8 +39,18 @@ public class Product {
     @Column(name = "benefit")
     private List<String> healthBenefits = new ArrayList<>();
 
+    // 👇👇 [추가] 알레르기 성분 (예: "땅콩", "우유")
+    @ElementCollection(fetch = FetchType.EAGER)
+    @CollectionTable(name = "product_allergens", joinColumns = @JoinColumn(name = "product_id"))
+    @Column(name = "allergen")
+    private List<String> allergens = new ArrayList<>();
+
     // 생성 편의 메서드
     public void addBenefit(String benefit) {
         this.healthBenefits.add(benefit);
+    }
+
+    public void addAllergen(String allergen) {
+        this.allergens.add(allergen);
     }
 }
