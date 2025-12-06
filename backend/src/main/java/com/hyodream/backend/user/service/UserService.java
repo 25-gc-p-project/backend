@@ -1,6 +1,7 @@
 package com.hyodream.backend.user.service;
 
-import com.hyodream.backend.auth.dto.SignupRequestDto; // 👈 에러 해결: import 추가
+import com.hyodream.backend.auth.dto.SignupRequestDto;
+import com.hyodream.backend.user.domain.Address;
 import com.hyodream.backend.user.domain.Allergy;
 import com.hyodream.backend.user.domain.Disease;
 import com.hyodream.backend.user.domain.HealthGoal;
@@ -78,15 +79,38 @@ public class UserService {
         userRepository.delete(user);
     }
 
-    // 프로필 수정
+    // 프로필 수정 (수정됨: 모든 필드 업데이트)
     @Transactional
     public void updateProfile(String username, SignupRequestDto dto) {
         User user = userRepository.findByUsername(username)
                 .orElseThrow(() -> new RuntimeException("사용자 없음"));
 
+        // 기본 정보 수정 (값이 있을 때만 변경)
         if (dto.getName() != null)
             user.setName(dto.getName());
         if (dto.getPhone() != null)
             user.setPhone(dto.getPhone());
+        if (dto.getBirthDate() != null)
+            user.setBirthDate(dto.getBirthDate());
+
+        // 주소 정보 수정 (하나라도 들어오면 업데이트)
+        if (dto.getCity() != null || dto.getStreet() != null || dto.getZipcode() != null) {
+            // 기존 주소 가져오기 (null 방지)
+            Address currentAddress = user.getAddress();
+            String city = (currentAddress != null) ? currentAddress.getCity() : "";
+            String street = (currentAddress != null) ? currentAddress.getStreet() : "";
+            String zipcode = (currentAddress != null) ? currentAddress.getZipcode() : "";
+
+            // 들어온 값만 덮어쓰기
+            if (dto.getCity() != null)
+                city = dto.getCity();
+            if (dto.getStreet() != null)
+                street = dto.getStreet();
+            if (dto.getZipcode() != null)
+                zipcode = dto.getZipcode();
+
+            // 새 주소 객체로 교체
+            user.setAddress(new Address(city, street, zipcode));
+        }
     }
 }
