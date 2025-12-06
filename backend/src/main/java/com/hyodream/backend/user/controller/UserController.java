@@ -3,6 +3,7 @@ package com.hyodream.backend.user.controller;
 import com.hyodream.backend.auth.dto.SignupRequestDto;
 import com.hyodream.backend.user.domain.User;
 import com.hyodream.backend.user.dto.HealthInfoRequestDto;
+import com.hyodream.backend.user.dto.UserProfileResponseDto;
 import com.hyodream.backend.user.service.UserService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -27,8 +28,12 @@ public class UserController {
 
     // 내 정보 조회
     @GetMapping("/profile")
-    public ResponseEntity<User> getMyProfile(Authentication auth) {
-        return ResponseEntity.ok(userService.getUser(auth.getName()));
+    public ResponseEntity<UserProfileResponseDto> getMyProfile(Authentication auth) {
+        // 유저 엔티티 가져오기
+        User user = userService.getUser(auth.getName());
+
+        // DTO로 변환해서 반환 (재귀 끊기)
+        return ResponseEntity.ok(new UserProfileResponseDto(user));
     }
 
     // 회원 수정

@@ -22,5 +22,9 @@ out/
 # 테스트 파일 무시
 test.py
 
+# 제미나이 CLI 파일 관련
+GEMINI.md
+session_memory.json
+
 # --- Sensitive Data (나중에 환경변수로 뺄 것들) ---
 # .env

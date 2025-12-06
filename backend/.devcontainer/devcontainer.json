@@ -9,7 +9,9 @@
             "installMaven": false
         },
         // 도커 명령어 사용 (Docker-in-Docker)
-        "ghcr.io/devcontainers/features/docker-in-docker:2": {}
+        "ghcr.io/devcontainers/features/docker-in-docker:2": {},
+        // Node.js 설치 (npm 도구용)
+        "ghcr.io/devcontainers/features/node:1": {}
     },
     "customizations": {
         "vscode": {
@@ -43,5 +45,6 @@
     "forwardPorts": [
         8080
     ],
-    "remoteUser": "vscode"
+    "remoteUser": "vscode",
+    "postCreateCommand": "sudo npm install -g @google/gemini-cli"
 }
