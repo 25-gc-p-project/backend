@@ -7,6 +7,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.hyodream.backend.payment.domain.PaymentStatus;
+
 @Service
 @RequiredArgsConstructor
 public class PaymentService {
@@ -19,6 +21,15 @@ public class PaymentService {
         // PG사 연동한다면 로직이 들어갈 자리
         Payment payment = Payment.createPayment(orderId, amount, method);
         paymentRepository.save(payment);
+    }
+
+    // 결제 취소 (OrderService에서 호출)
+    @Transactional
+    public void cancelPayment(Long orderId) {
+        Payment payment = paymentRepository.findByOrderId(orderId)
+                .orElseThrow(() -> new RuntimeException("결제 정보가 없습니다."));
+
+        payment.setStatus(PaymentStatus.CANCELED);
     }
 
     // 결제 내역 조회 (Controller에서 호출)

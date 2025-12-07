@@ -118,5 +118,8 @@ public class OrderService {
         for (OrderItem item : order.getOrderItems()) {
             productService.decreaseTotalSales(item.getProductId(), item.getCount());
         }
+
+        // 결제 취소 처리
+        paymentService.cancelPayment(orderId);
     }
 }

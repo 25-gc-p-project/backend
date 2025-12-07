@@ -24,6 +24,9 @@ public class Payment {
 
     private LocalDateTime paymentDate;
 
+    @Enumerated(EnumType.STRING)
+    private PaymentStatus status; // 결제 상태 추가
+
     // 생성 메서드
     public static Payment createPayment(Long orderId, int amount, String method) {
         Payment payment = new Payment();
@@ -31,6 +34,7 @@ public class Payment {
         payment.setAmount(amount);
         payment.setPaymentMethod(method);
         payment.setPaymentDate(LocalDateTime.now());
+        payment.setStatus(PaymentStatus.DONE); // 기본값: 완료
         return payment;
     }
 }
