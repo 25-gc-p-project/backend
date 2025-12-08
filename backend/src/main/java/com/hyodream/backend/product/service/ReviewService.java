@@ -8,7 +8,7 @@ import com.hyodream.backend.product.dto.ReviewResponseDto;
 import com.hyodream.backend.product.repository.ProductRepository;
 import com.hyodream.backend.product.repository.ReviewRepository;
 import com.hyodream.backend.user.domain.User;
-import com.hyodream.backend.user.repository.UserRepository;
+import com.hyodream.backend.user.service.UserService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -22,14 +22,13 @@ public class ReviewService {
 
     private final ReviewRepository reviewRepository;
     private final OrderItemRepository orderItemRepository;
-    private final UserRepository userRepository;
+    private final UserService userService;
     private final ProductRepository productRepository;
 
     // 1. 리뷰 작성
     @Transactional
-    public void createReview(String username, ReviewRequestDto dto) {
-        User user = userRepository.findByUsername(username)
-                .orElseThrow(() -> new RuntimeException("사용자 없음"));
+    public void createReview(ReviewRequestDto dto) {
+        User user = userService.getCurrentUser();
 
         // 상품 존재 확인 (MSA에서는 여기서 ProductClient 호출로 변경됨)
         if (!productRepository.existsById(dto.getProductId())) {
@@ -75,11 +74,10 @@ public class ReviewService {
 
     // 리뷰 수정
     @Transactional
-    public void updateReview(Long reviewId, String username, ReviewRequestDto dto) {
+    public void updateReview(Long reviewId, ReviewRequestDto dto) {
         Review review = reviewRepository.findById(reviewId)
                 .orElseThrow(() -> new RuntimeException("리뷰가 없습니다."));
-        User user = userRepository.findByUsername(username)
-                .orElseThrow(() -> new RuntimeException("사용자 없음"));
+        User user = userService.getCurrentUser();
 
         // 본인 확인 (이게 핵심 보안 로직)
         if (!review.getUserId().equals(user.getId())) {
@@ -94,11 +92,10 @@ public class ReviewService {
 
     // 리뷰 삭제
     @Transactional
-    public void deleteReview(Long reviewId, String username) {
+    public void deleteReview(Long reviewId) {
         Review review = reviewRepository.findById(reviewId)
                 .orElseThrow(() -> new RuntimeException("리뷰가 없습니다."));
-        User user = userRepository.findByUsername(username)
-                .orElseThrow(() -> new RuntimeException("사용자 없음"));
+        User user = userService.getCurrentUser();
 
         // 본인 확인
         if (!review.getUserId().equals(user.getId())) {
@@ -110,10 +107,9 @@ public class ReviewService {
 
     // 내가 쓴 리뷰 조회
     @Transactional(readOnly = true)
-    public List<ReviewResponseDto> getMyReviews(String username) {
+    public List<ReviewResponseDto> getMyReviews() {
         // 사용자 찾기 (username -> userId)
-        User user = userRepository.findByUsername(username)
-                .orElseThrow(() -> new RuntimeException("사용자 없음"));
+        User user = userService.getCurrentUser();
 
         // 리뷰 목록 조회
         List<Review> reviews = reviewRepository.findByUserId(user.getId());

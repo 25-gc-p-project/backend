@@ -15,6 +15,7 @@ import com.hyodream.backend.user.repository.DiseaseRepository;
 import com.hyodream.backend.user.repository.HealthGoalRepository;
 import com.hyodream.backend.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -26,6 +27,18 @@ public class UserService {
     private final DiseaseRepository diseaseRepository;
     private final AllergyRepository allergyRepository;
     private final HealthGoalRepository healthGoalRepository;
+
+    /**
+     * 현재 로그인한 사용자 정보를 반환 (SecurityContextHolder 이용)
+     */
+    public User getCurrentUser() {
+        String username = SecurityContextHolder.getContext()
+                .getAuthentication()
+                .getName();
+
+        return userRepository.findByUsername(username)
+                .orElseThrow(() -> new RuntimeException("로그인된 사용자를 찾을 수 없습니다."));
+    }
 
     // 건강 정보 저장/수정
     @Transactional

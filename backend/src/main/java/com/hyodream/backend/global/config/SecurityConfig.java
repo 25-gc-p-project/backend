@@ -42,6 +42,7 @@ public class SecurityConfig {
                                 "/api/auth/**",
                                 "/api/products/**",
                                 "/api/events/**", // 이벤트 수집
+                                "/api/naver/**", // 네이버 검색 API는 인증 없이 허용
                                 "/error",
                                 "/swagger-ui/**",
                                 "/swagger-ui.html",

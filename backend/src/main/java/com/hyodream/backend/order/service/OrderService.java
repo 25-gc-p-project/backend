@@ -13,7 +13,7 @@ import com.hyodream.backend.product.domain.Product;
 import com.hyodream.backend.product.repository.ProductRepository;
 import com.hyodream.backend.product.service.ProductService;
 import com.hyodream.backend.user.domain.User;
-import com.hyodream.backend.user.repository.UserRepository;
+import com.hyodream.backend.user.service.UserService;
 
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -27,16 +27,15 @@ import java.util.List;
 public class OrderService {
 
     private final OrderRepository orderRepository;
-    private final UserRepository userRepository;
+    private final UserService userService;
     private final ProductRepository productRepository;
     private final PaymentService paymentService;
     private final ProductService productService;
 
     // 주문 생성
     @Transactional
-    public Long order(String username, List<OrderRequestDto> itemDtos) {
-        User user = userRepository.findByUsername(username)
-                .orElseThrow(() -> new RuntimeException("사용자 없음"));
+    public Long order(List<OrderRequestDto> itemDtos) {
+        User user = userService.getCurrentUser();
 
         List<OrderItem> orderItems = new ArrayList<>();
         int totalAmount = 0; // 총 결제 금액 계산용 변수
@@ -67,9 +66,8 @@ public class OrderService {
 
     // 내 주문 내역 조회
     @Transactional(readOnly = true)
-    public List<OrderResponseDto> getMyOrders(String username) {
-        User user = userRepository.findByUsername(username)
-                .orElseThrow(() -> new RuntimeException("사용자 없음"));
+    public List<OrderResponseDto> getMyOrders() {
+        User user = userService.getCurrentUser();
 
         List<Order> orders = orderRepository.findAllByUserIdOrderByOrderDateDesc(user.getId());
 
@@ -94,12 +92,11 @@ public class OrderService {
 
     // 주문 취소
     @Transactional
-    public void cancelOrder(Long orderId, String username) {
+    public void cancelOrder(Long orderId) {
         Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new RuntimeException("주문이 존재하지 않습니다."));
 
-        User user = userRepository.findByUsername(username)
-                .orElseThrow(() -> new RuntimeException("사용자 없음"));
+        User user = userService.getCurrentUser();
 
         // 본인 확인
         if (!order.getUserId().equals(user.getId())) {

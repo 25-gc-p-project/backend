@@ -1,35 +1,43 @@
 package com.hyodream.backend.product.service;
 
+import com.hyodream.backend.global.client.AiClient;
 import com.hyodream.backend.product.domain.Product;
+import com.hyodream.backend.product.domain.SearchLog;
 import com.hyodream.backend.product.dto.ProductRequestDto;
 import com.hyodream.backend.product.dto.ProductResponseDto;
+import com.hyodream.backend.product.naver.service.NaverShoppingService;
 import com.hyodream.backend.product.repository.ProductRepository;
-import com.hyodream.backend.global.client.AiClient;
-
+import com.hyodream.backend.product.repository.SearchLogRepository;
 import com.hyodream.backend.user.domain.User;
-import com.hyodream.backend.user.repository.UserRepository;
 import com.hyodream.backend.user.dto.HealthInfoRequestDto;
-
+import com.hyodream.backend.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class ProductService {
 
     private final ProductRepository productRepository;
+    private final SearchLogRepository searchLogRepository;
+    private final NaverShoppingService naverShoppingService;
     private final AiClient aiClient;
 
     private final UserRepository userRepository;
@@ -121,9 +129,6 @@ public class ProductService {
         List<ProductResponseDto> finalDtos = new ArrayList<>();
 
         for (Product p : resultList) {
-            // 알레르기 필터링은 위 쿼리에서 이미 했지만, 주입된 상품(interestProducts)도 알레르기 체크가 필요할 수 있음
-            // 하지만 주입된 상품은 "사용자가 직접 클릭해서 점수를 올린" 상품이므로, 알레르기가 있어도 보여주는 게 맞음 (의도적 접근)
-            // 따라서 여기선 중복만 제거
             if (!addedIds.contains(p.getId())) {
                 finalDtos.add(new ProductResponseDto(p));
                 addedIds.add(p.getId());
@@ -149,16 +154,13 @@ public class ProductService {
         List<Product> finalProducts = new ArrayList<>();
 
         // [A] 실시간 행동 기반 추천 (공통)
-        // 로그인 여부와 상관없이 식별자(identifier)로 Redis 조회
         String redisKey = "interest:user:" + identifier;
         Set<String> topInterests = redisTemplate.opsForZSet().reverseRange(redisKey, 0, 0);
 
         if (topInterests != null && !topInterests.isEmpty()) {
             String hotCategory = topInterests.iterator().next();
-            // 해당 태그 상품 3개 가져오기 (메서드 재활용)
             List<Product> realTimePicks = productRepository.findByHealthBenefitsContaining(hotCategory);
 
-            // 최대 3개만
             if (realTimePicks.size() > 3)
                 realTimePicks = realTimePicks.subList(0, 3);
             finalProducts.addAll(realTimePicks);
@@ -193,16 +195,69 @@ public class ProductService {
                 .collect(Collectors.toList());
     }
 
-    // 상품 검색 기능 (이름으로)
-    @Transactional(readOnly = true)
+    // 상품 검색 기능 (통합 검색: Cache-Aside 패턴 적용)
+    // 읽기 전용 제거 -> Import 때문에 쓰기 트랜잭션 필요
+    @Transactional
     public Page<ProductResponseDto> searchProducts(String keyword, int page, int size) {
         if (keyword == null || keyword.trim().isEmpty()) {
             return Page.empty(); // 빈 리스트 대신 빈 페이지 반환
         }
 
+        // 1. [Cache-Aside] 네이버 API를 통한 데이터 최신화 확인
+        try {
+            SearchLog log = searchLogRepository.findById(keyword).orElse(null);
+            boolean needUpdate = false;
+
+            if (log == null) {
+                needUpdate = true; // 최초 검색
+            } else if (log.getLastUpdatedAt().isBefore(LocalDateTime.now().minusHours(24))) {
+                needUpdate = true; // TTL 만료 (24시간 경과)
+            }
+
+            if (needUpdate) {
+                // 네이버 API 호출하여 DB 적재 (필터링 로직 포함)
+                // 주의: importNaverProducts 내부에서 현재 유저 컨텍스트를 타므로, 
+                // 로그인 유저의 알러지 상품은 저장되지 않음.
+                naverShoppingService.importNaverProducts(keyword);
+
+                // 로그 갱신
+                if (log == null) {
+                    log = new SearchLog(keyword, LocalDateTime.now());
+                } else {
+                    log.updateTimestamp();
+                }
+                searchLogRepository.save(log);
+                System.out.println("✅ [Cache-Aside] Updated DB from Naver for keyword: " + keyword);
+            }
+        } catch (Exception e) {
+            // 외부 API 장애 시에도 기존 DB 데이터로 검색 진행 (Fallback)
+            System.err.println("⚠️ Naver Import Failed: " + e.getMessage());
+        }
+
+        // 2. DB 조회 (로그인 여부 및 알러지 필터링 적용)
+        boolean isLogin = false;
+        List<String> userAllergies = new ArrayList<>();
+
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth != null && auth.isAuthenticated() && !"anonymousUser".equals(auth.getPrincipal())) {
+            String username = auth.getName();
+            userRepository.findByUsername(username).ifPresent(user -> {
+                user.getAllergies().forEach(ua -> userAllergies.add(ua.getAllergy().getName()));
+            });
+            if (!userAllergies.isEmpty()) {
+                isLogin = true;
+            }
+        }
+        
+        // 쿼리 에러 방지용 더미 데이터
+        if (userAllergies.isEmpty()) {
+            userAllergies.add("NONE");
+        }
+
         Pageable pageable = PageRequest.of(page, size, Sort.by("id").descending());
 
-        return productRepository.findByNameContaining(keyword, pageable)
+        // 안전한 검색 쿼리 실행
+        return productRepository.findByNameContainingWithPersonalization(keyword, isLogin, userAllergies, pageable)
                 .map(ProductResponseDto::new);
     }
 
@@ -235,12 +290,9 @@ public class ProductService {
 
         // 누적 판매량 증가
         product.setTotalSales(product.getTotalSales() + count);
-
-        // (선택) 재고 관리(Stock) 기능도 나중에 여기에 넣으면 됨
-        // product.decreaseStock(count);
     }
 
-    // 8. 판매량 감소 (주문 취소 시 호출)
+    // 판매량 감소 (주문 취소 시 호출)
     @Transactional
     public void decreaseTotalSales(Long productId, int count) {
         Product product = productRepository.findById(productId)

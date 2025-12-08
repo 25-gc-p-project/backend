@@ -5,7 +5,6 @@ import com.hyodream.backend.product.dto.ReviewResponseDto;
 import com.hyodream.backend.product.service.ReviewService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -21,10 +20,9 @@ public class ReviewController {
     // POST http://localhost:8080/api/reviews
     @PostMapping
     public ResponseEntity<String> createReview(
-            @RequestBody ReviewRequestDto dto,
-            Authentication authentication // 토큰에서 사용자 정보 꺼내기
+            @RequestBody ReviewRequestDto dto
     ) {
-        reviewService.createReview(authentication.getName(), dto);
+        reviewService.createReview(dto);
         return ResponseEntity.ok("리뷰가 등록되었습니다.");
     }
 
@@ -38,9 +36,9 @@ public class ReviewController {
     // 내가 쓴 리뷰 조회
     // GET http://localhost:8080/api/reviews/my
     @GetMapping("/my")
-    public ResponseEntity<List<ReviewResponseDto>> getMyReviews(Authentication authentication) {
+    public ResponseEntity<List<ReviewResponseDto>> getMyReviews() {
         // 서비스 호출
-        List<ReviewResponseDto> myReviews = reviewService.getMyReviews(authentication.getName());
+        List<ReviewResponseDto> myReviews = reviewService.getMyReviews();
         return ResponseEntity.ok(myReviews);
     }
 
@@ -49,9 +47,8 @@ public class ReviewController {
     @PutMapping("/{reviewId}")
     public ResponseEntity<String> updateReview(
             @PathVariable Long reviewId,
-            @RequestBody ReviewRequestDto dto,
-            Authentication auth) {
-        reviewService.updateReview(reviewId, auth.getName(), dto);
+            @RequestBody ReviewRequestDto dto) {
+        reviewService.updateReview(reviewId, dto);
         return ResponseEntity.ok("리뷰가 수정되었습니다.");
     }
 
@@ -59,9 +56,8 @@ public class ReviewController {
     // DELETE http://localhost:8080/api/reviews/{reviewId}
     @DeleteMapping("/{reviewId}")
     public ResponseEntity<String> deleteReview(
-            @PathVariable Long reviewId,
-            Authentication auth) {
-        reviewService.deleteReview(reviewId, auth.getName());
+            @PathVariable Long reviewId) {
+        reviewService.deleteReview(reviewId);
         return ResponseEntity.ok("리뷰가 삭제되었습니다.");
     }
 }

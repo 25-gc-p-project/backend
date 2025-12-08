@@ -11,6 +11,7 @@ public class ProductResponseDto {
     private int price;
     private String imageUrl;
     private List<String> healthBenefits;
+    private List<String> allergens; // 알러지 정보 추가
 
     // 엔티티 -> DTO 변환 생성자
     public ProductResponseDto(Product product) {
@@ -19,5 +20,6 @@ public class ProductResponseDto {
         this.price = product.getPrice();
         this.imageUrl = product.getImageUrl();
         this.healthBenefits = product.getHealthBenefits();
+        this.allergens = product.getAllergens();
     }
 }

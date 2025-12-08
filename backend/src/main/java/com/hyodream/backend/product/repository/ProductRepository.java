@@ -18,6 +18,8 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
 
     List<Product> findTop5ByHealthBenefitsContainingOrderByIdDesc(String benefit);
 
+    boolean existsByName(String name);
+
     // 커스텀 정렬 & 필터링 쿼리
     // Filtering: 내 알레르기 리스트(:userAllergies)에 포함된 성분이 하나라도 있으면 제외
     // Sorting: 내 관심사(:interest)가 healthBenefits에 포함되면 우선순위 0 (상단), 아니면 1 (하단) ->
@@ -25,6 +27,16 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
     @Query("SELECT DISTINCT p FROM Product p " +
             "WHERE (:isLogin = false OR NOT EXISTS (SELECT 1 FROM p.allergens a WHERE a IN :userAllergies))")
     Page<Product> findAllWithPersonalization(
+            @Param("isLogin") boolean isLogin,
+            @Param("userAllergies") List<String> userAllergies,
+            Pageable pageable);
+
+    // 검색어 포함 + 알러지 필터링
+    @Query("SELECT DISTINCT p FROM Product p " +
+            "WHERE p.name LIKE %:keyword% " +
+            "AND (:isLogin = false OR NOT EXISTS (SELECT 1 FROM p.allergens a WHERE a IN :userAllergies))")
+    Page<Product> findByNameContainingWithPersonalization(
+            @Param("keyword") String keyword,
             @Param("isLogin") boolean isLogin,
             @Param("userAllergies") List<String> userAllergies,
             Pageable pageable);

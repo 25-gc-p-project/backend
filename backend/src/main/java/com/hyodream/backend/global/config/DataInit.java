@@ -31,8 +31,12 @@ public class DataInit implements CommandLineRunner {
                 diseaseRepository.save(d);
             }
         }
-        // 알레르기
-        String[] allergies = { "땅콩", "우유", "달걀", "대두", "밀가루", "생선", "갑각류" };
+        // 알레르기 (법적 중요 알러지 19종)
+        String[] allergies = {
+            "난류(달걀)", "우유", "메밀", "밀", "대두", "땅콩", "호두", "잣",
+            "고등어", "게", "새우", "오징어", "조개류", "돼지고기", "쇠고기", "닭고기",
+            "복숭아", "토마토", "아황산류"
+        };
         for (String name : allergies) {
             if (allergyRepository.findByName(name).isEmpty()) {
                 Allergy a = new Allergy();
