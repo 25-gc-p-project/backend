@@ -4,11 +4,13 @@ import com.hyodream.backend.order.repository.OrderItemRepository;
 import com.hyodream.backend.product.domain.Product;
 import com.hyodream.backend.product.repository.ProductRepository;
 import lombok.RequiredArgsConstructor;
+import com.hyodream.backend.product.domain.ProductStatus;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 
 @Service
@@ -48,5 +50,35 @@ public class ProductScheduler {
         }
 
         System.out.println("✅ [스케줄러] 업데이트 완료!");
+    }
+
+    // [New] 매일 새벽 4시에 오래된 상품 정리 (Garbage Collection)
+    @Scheduled(cron = "0 0 4 * * *")
+    @Transactional
+    public void cleanupOldProducts() {
+        System.out.println("🧹 [스케줄러] 오래된 상품 정리 시작...");
+        
+        // 30일 이상 업데이트 안 된 상품 조회
+        LocalDateTime threshold = LocalDateTime.now().minusDays(30);
+        List<Product> oldProducts = productRepository.findByUpdatedAtBefore(threshold);
+
+        int deletedCount = 0;
+        int stoppedCount = 0;
+
+        for (Product p : oldProducts) {
+            if (p.getTotalSales() > 0) {
+                // 판매 이력이 있으면 지우지 않고 '판매 중지' 처리 (주문 내역 보존)
+                if (p.getStatus() != ProductStatus.STOP_SELLING) {
+                    p.setStatus(ProductStatus.STOP_SELLING);
+                    stoppedCount++;
+                }
+            } else {
+                // 판매 이력이 없으면 과감하게 삭제 (DB 용량 확보)
+                productRepository.delete(p);
+                deletedCount++;
+            }
+        }
+
+        System.out.printf("✅ [스케줄러] 정리 완료! (삭제: %d건, 판매중지: %d건)%n", deletedCount, stoppedCount);
     }
 }

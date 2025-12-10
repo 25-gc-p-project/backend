@@ -3,7 +3,13 @@ package com.hyodream.backend.product.controller;
 import com.hyodream.backend.product.dto.ProductRequestDto;
 import com.hyodream.backend.product.dto.ProductResponseDto;
 import com.hyodream.backend.product.service.ProductService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.web.PagedModel;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.security.core.Authentication;
@@ -11,6 +17,7 @@ import org.springframework.data.domain.Page;
 
 import java.util.List;
 
+@Tag(name = "Product API", description = "상품 검색, 조회 및 추천 관련 API")
 @RestController
 @RequestMapping("/api/products")
 @RequiredArgsConstructor
@@ -18,45 +25,51 @@ public class ProductController {
 
     private final ProductService productService;
 
-    // 상품 등록 (관리자용 - 일단 누구나 쓸 수 있게 열어둠 or 토큰 필요)
+    @Operation(summary = "상품 수동 등록 (관리자용)", description = "관리자가 상품을 직접 등록합니다.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "상품 등록 성공"),
+            @ApiResponse(responseCode = "400", description = "잘못된 입력 값")
+    })
     @PostMapping
     public ResponseEntity<String> createProduct(@RequestBody ProductRequestDto dto) {
         productService.createProduct(dto);
         return ResponseEntity.ok("상품 등록 완료!");
     }
 
-    // 전체 목록 조회
-    // 사용법: GET /api/products?page=0&size=10
-    // 헤더: X-Session-Id (비로그인 유저 식별용)
+    @Operation(summary = "전체 상품 목록 조회", description = "DB에 저장된 모든 상품을 페이징하여 조회합니다. 인기순/최신순 정렬이 가능합니다.\n" +
+            "첫 페이지(page=0) 조회 시, 사용자(또는 세션)의 실시간 관심사를 반영한 추천 상품 3개가 최상단에 자동 주입됩니다.")
     @GetMapping
-    public ResponseEntity<Page<ProductResponseDto>> getAllProducts(
-            @RequestParam(defaultValue = "0") int page, // 안 보내면 0페이지(처음)
-            @RequestParam(defaultValue = "10") int size, // 안 보내면 10개씩
-            @RequestParam(defaultValue = "latest") String sort, // 정렬 기준 추가 (기본값: 인기순)
-            @RequestHeader(value = "X-Session-Id", required = false) String sessionId,
-            Authentication auth // 로그인 여부 확인용
-    ) {
+    public ResponseEntity<PagedModel<ProductResponseDto>> getAllProducts(
+            @Parameter(description = "페이지 번호 (0부터 시작)") @RequestParam(defaultValue = "0") int page,
+            @Parameter(description = "페이지 크기") @RequestParam(defaultValue = "10") int size,
+            @Parameter(description = "정렬 기준 ('latest': 최신순, 'popular': 인기순)") @RequestParam(defaultValue = "latest") String sort,
+            @Parameter(description = "비로그인 유저 세션 ID (개인화 추천을 위한 식별자)") @RequestHeader(value = "X-Session-Id", required = false) String sessionId,
+            Authentication auth) {
         // 식별자 결정: 로그인했으면 ID, 아니면 세션ID
         String identifier = (auth != null && auth.isAuthenticated()) ? auth.getName() : sessionId;
         if (identifier == null)
             identifier = "unknown";
 
-        return ResponseEntity.ok(productService.getAllProducts(page, size, sort, identifier));
+        Page<ProductResponseDto> result = productService.getAllProducts(page, size, sort, identifier);
+        return ResponseEntity.ok(new PagedModel<>(result));
     }
 
-    // 상세 조회
+    @Operation(summary = "상품 상세 조회", description = "상품 ID로 상세 정보를 조회합니다.")
     @GetMapping("/{id}")
     public ResponseEntity<ProductResponseDto> getProduct(@PathVariable Long id) {
         return ResponseEntity.ok(productService.getProduct(id));
     }
 
-    // 추천 상품 조회
-    // GET http://localhost:8080/api/products/recommend
-    // 헤더: Authorization bearer (로그인 시), X-Session-Id (비로그인 시)
-    // AI 추천 (로그인 필수)
+    @Operation(summary = "개인화 맞춤 상품 추천 (하이브리드)", description = """
+            사용자의 상태에 따라 다양한 알고리즘을 결합하여 최적의 상품을 추천합니다:
+            1. [실시간] 최근 본 상품과 유사한 카테고리의 인기 상품 (비로그인 가능) - 최대 3개
+            2. [건강목표] 사용자가 설정한 기대효과(예: 눈 건강)에 부합하는 상품 - 각 목표당 2개
+            3. [지병] 같은 지병을 앓는 다른 사용자들이 많이 구매한 검증된 상품 - 각 지병당 3개
+            4. [AI] AI가 종합적인 건강 데이터를 분석하여 선별한 상품 - 최대 3개
+            """)
     @GetMapping("/recommend")
     public ResponseEntity<List<ProductResponseDto>> getRecommendedProducts(
-            @RequestHeader(value = "X-Session-Id", required = false) String sessionId,
+            @Parameter(description = "비로그인 유저 세션 ID") @RequestHeader(value = "X-Session-Id", required = false) String sessionId,
             Authentication auth) {
         String identifier;
         boolean isLogin = false;
@@ -76,17 +89,18 @@ public class ProductController {
         return ResponseEntity.ok(productService.getRecommendedProducts(identifier, isLogin));
     }
 
-    // 사용법: GET /api/products/search?keyword=관절&page=0&size=10
+    @Operation(summary = "상품 키워드 검색", description = "키워드로 상품을 검색합니다. (네이버 쇼핑 API 연동 및 DB 캐싱)")
     @GetMapping("/search")
-    public ResponseEntity<Page<ProductResponseDto>> searchProducts(
-            @RequestParam("keyword") String keyword,
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "10") int size) {
-        return ResponseEntity.ok(productService.searchProducts(keyword, page, size));
+    public ResponseEntity<PagedModel<ProductResponseDto>> searchProducts(
+            @Parameter(description = "검색어 (예: 관절, 루테인)") @RequestParam("keyword") String keyword,
+            @Parameter(description = "페이지 번호") @RequestParam(defaultValue = "0") int page,
+            @Parameter(description = "페이지 크기") @RequestParam(defaultValue = "10") int size,
+            @Parameter(description = "정렬 기준 ('latest': 최신순, 'popular': 인기순)") @RequestParam(defaultValue = "latest") String sort) {
+        Page<ProductResponseDto> result = productService.searchProducts(keyword, page, size, sort);
+        return ResponseEntity.ok(new PagedModel<>(result));
     }
 
-    // 연관 상품 추천 API
-    // GET http://localhost:8080/api/products/{id}/related
+    @Operation(summary = "연관 상품 추천", description = "해당 상품을 본 사용자들이 함께 많이 구매한 상품(Collaborative Filtering)을 추천합니다.")
     @GetMapping("/{id}/related")
     public ResponseEntity<List<ProductResponseDto>> getRelatedProducts(@PathVariable Long id) {
         return ResponseEntity.ok(productService.getRelatedProducts(id));

@@ -27,6 +27,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -117,6 +118,11 @@ public class ProductService {
                 List<Product> interestProducts = productRepository
                         .findTop5ByHealthBenefitsContainingOrderByIdDesc(interestCategory);
 
+                // 상위 3개만 주입 (개수 제한)
+                if (interestProducts.size() > 3) {
+                    interestProducts = interestProducts.subList(0, 3);
+                }
+
                 // 맨 앞에 삽입
                 for (int i = interestProducts.size() - 1; i >= 0; i--) {
                     resultList.add(0, interestProducts.get(i));
@@ -148,30 +154,66 @@ public class ProductService {
         return new ProductResponseDto(product);
     }
 
-    // AI + 실시간 하이브리드 추천 (로그인 유저 전용)
+    // AI + 실시간 + 유저 기대효과 하이브리드 추천 (로그인 유저 전용)
     @Transactional(readOnly = true)
     public List<ProductResponseDto> getRecommendedProducts(String identifier, boolean isLogin) {
         List<Product> finalProducts = new ArrayList<>();
 
         // [A] 실시간 행동 기반 추천 (공통)
-        String redisKey = "interest:user:" + identifier;
-        Set<String> topInterests = redisTemplate.opsForZSet().reverseRange(redisKey, 0, 0);
+        try {
+            String redisKey = "interest:user:" + identifier;
+            Set<String> topInterests = redisTemplate.opsForZSet().reverseRange(redisKey, 0, 0);
 
-        if (topInterests != null && !topInterests.isEmpty()) {
-            String hotCategory = topInterests.iterator().next();
-            List<Product> realTimePicks = productRepository.findByHealthBenefitsContaining(hotCategory);
+            if (topInterests != null && !topInterests.isEmpty()) {
+                String hotCategory = topInterests.iterator().next();
+                List<Product> realTimePicks = productRepository.findByHealthBenefitsContaining(hotCategory);
 
-            if (realTimePicks.size() > 3)
-                realTimePicks = realTimePicks.subList(0, 3);
-            finalProducts.addAll(realTimePicks);
+                if (realTimePicks.size() > 3)
+                    realTimePicks = realTimePicks.subList(0, 3);
+                finalProducts.addAll(realTimePicks);
+            }
+        } catch (Exception e) {
+            log.warn("Redis Recommendation Failed: {}", e.getMessage());
         }
 
-        // [B] AI 기반 추천 (로그인 유저만!)
         if (isLogin) {
             try {
                 User user = userRepository.findByUsername(identifier)
                         .orElseThrow(() -> new RuntimeException("사용자 없음"));
 
+                // [B] 유저 기대효과(HealthGoal) 기반 추천
+                // 유저가 설정한 목표(예: "눈 건강")에 맞는 상품을 DB에서 직접 조회해서 추가
+                if (user.getHealthGoals() != null && !user.getHealthGoals().isEmpty()) {
+                    for (var userGoal : user.getHealthGoals()) {
+                        String goalName = userGoal.getHealthGoal().getName();
+                        List<Product> goalPicks = productRepository.findByHealthBenefitsContaining(goalName);
+                        
+                        // 각 목표당 2개씩만 추천에 추가 (너무 많으면 AI 추천이 묻힘)
+                        if (goalPicks.size() > 2) {
+                            goalPicks = goalPicks.subList(0, 2);
+                        }
+                        finalProducts.addAll(goalPicks);
+                    }
+                }
+
+                // [C] 동병상련 추천 (같은 지병을 가진 다른 유저들이 많이 산 상품) - [NEW]
+                if (user.getDiseases() != null && !user.getDiseases().isEmpty()) {
+                    for (var userDisease : user.getDiseases()) {
+                        String diseaseName = userDisease.getDisease().getName();
+                        // 해당 지병을 가진 사람들이 많이 산 상품 TOP 3 조회
+                        List<Product> diseasePicks = productRepository.findTopSellingProductsByDisease(diseaseName);
+                        
+                        if (diseasePicks != null && !diseasePicks.isEmpty()) {
+                            // 여기서는 별도 태그를 달아줄 순 없지만, 결과 리스트에 포함됨.
+                            // 프론트엔드에서 "000 환우들이 선택한 상품" 섹션으로 구분하려면 
+                            // 별도 API로 분리하거나 DTO에 type을 추가해야 함.
+                            // 현재는 통합 리스트 반환이므로 그냥 추가.
+                            finalProducts.addAll(diseasePicks);
+                        }
+                    }
+                }
+
+                // [D] AI 기반 추천
                 HealthInfoRequestDto requestDto = new HealthInfoRequestDto();
                 requestDto.setDiseaseNames(user.getDiseases().stream().map(d -> d.getDisease().getName()).toList());
                 requestDto.setAllergyNames(user.getAllergies().stream().map(a -> a.getAllergy().getName()).toList());
@@ -179,17 +221,19 @@ public class ProductService {
                         user.getHealthGoals().stream().map(h -> h.getHealthGoal().getName()).toList());
 
                 List<Long> aiProductIds = aiClient.getRecommendations(requestDto);
-                List<Product> aiProducts = productRepository.findAllById(aiProductIds);
-
-                finalProducts.addAll(aiProducts);
+                if (aiProductIds != null && !aiProductIds.isEmpty()) {
+                    List<Product> aiProducts = productRepository.findAllById(aiProductIds);
+                    finalProducts.addAll(aiProducts);
+                }
 
             } catch (Exception e) {
-                System.err.println("⚠️ AI 서버 연동 실패 (Fallback 가동): " + e.getMessage());
+                log.warn("AI/DB Recommendation Failed (Fallback): {}", e.getMessage());
             }
         }
 
-        // [C] 중복 제거 및 반환
+        // [D] 중복 제거 및 반환
         return finalProducts.stream()
+                .filter(Objects::nonNull) // null 방지
                 .distinct()
                 .map(ProductResponseDto::new)
                 .collect(Collectors.toList());
@@ -198,7 +242,7 @@ public class ProductService {
     // 상품 검색 기능 (통합 검색: Cache-Aside 패턴 적용)
     // 읽기 전용 제거 -> Import 때문에 쓰기 트랜잭션 필요
     @Transactional
-    public Page<ProductResponseDto> searchProducts(String keyword, int page, int size) {
+    public Page<ProductResponseDto> searchProducts(String keyword, int page, int size, String sort) {
         if (keyword == null || keyword.trim().isEmpty()) {
             return Page.empty(); // 빈 리스트 대신 빈 페이지 반환
         }
@@ -254,7 +298,13 @@ public class ProductService {
             userAllergies.add("NONE");
         }
 
-        Pageable pageable = PageRequest.of(page, size, Sort.by("id").descending());
+        // 정렬 기준 적용
+        Sort sortCondition = Sort.by("id").descending(); // 기본: 최신순
+        if ("popular".equals(sort)) {
+            sortCondition = Sort.by("recentSales").descending().and(Sort.by("id").descending());
+        }
+
+        Pageable pageable = PageRequest.of(page, size, sortCondition);
 
         // 안전한 검색 쿼리 실행
         return productRepository.findByNameContainingWithPersonalization(keyword, isLogin, userAllergies, pageable)

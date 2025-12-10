@@ -1,5 +1,6 @@
 package com.hyodream.backend.product.domain;
 
+import com.hyodream.backend.global.domain.BaseTimeEntity;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
@@ -10,17 +11,24 @@ import java.util.List;
 @Getter
 @Setter
 @Table(name = "products")
-public class Product {
+public class Product extends BaseTimeEntity {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
+
+    // 네이버 쇼핑 고유 ID (중복 저장 방지 및 업데이트 키)
+    @Column(unique = true)
+    private String naverProductId;
 
     @Column(nullable = false)
     private String name; // 상품명
 
     @Column(nullable = false)
     private int price; // 가격
+
+    @Enumerated(EnumType.STRING)
+    private ProductStatus status = ProductStatus.ON_SALE; // 판매 상태
 
     @Column(columnDefinition = "TEXT")
     private String description; // 상세 설명

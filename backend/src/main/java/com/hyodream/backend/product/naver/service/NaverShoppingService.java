@@ -2,6 +2,7 @@ package com.hyodream.backend.product.naver.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hyodream.backend.product.domain.Product;
+import com.hyodream.backend.product.domain.ProductStatus;
 import com.hyodream.backend.product.naver.dto.NaverShopItemDto;
 import com.hyodream.backend.product.naver.dto.NaverShopSearchResponse;
 import com.hyodream.backend.product.repository.ProductRepository;
@@ -41,8 +42,12 @@ public class NaverShoppingService {
 
     // 알러지별로 제외할 키워드들 (법적 19종 기준)
     private static final Map<String, List<String>> ALLERGEN_KEYWORDS = new HashMap<>();
+    
+    // 기대효과별 매핑 키워드 (자동 태깅용)
+    private static final Map<String, List<String>> BENEFIT_KEYWORDS = new HashMap<>();
 
     static {
+        // --- 알레르기 키워드 ---
         // 난류/유제품
         ALLERGEN_KEYWORDS.put("egg", List.of("계란", "달걀", "난류", "egg", "난백", "난황"));
         ALLERGEN_KEYWORDS.put("milk", List.of("우유", "milk", "유당", "버터", "치즈", "요거트", "크림", "분유", "유청"));
@@ -73,6 +78,46 @@ public class NaverShoppingService {
 
         // 기타
         ALLERGEN_KEYWORDS.put("sulfite", List.of("아황산", "sulfite", "와인", "건조과일"));
+
+        // --- 기대효과 키워드 (Product.healthBenefits 매핑) ---
+        // 1. 면역력 강화
+        BENEFIT_KEYWORDS.put("면역력 강화", List.of("면역", "아연", "비타민C", "프로폴리스", "홍삼", "알로에", "상황버섯", "로얄젤리"));
+
+        // 2. 피로 회복 (식품 + 힐링 용품)
+        BENEFIT_KEYWORDS.put("피로 회복", List.of(
+            "피로", "비타민B", "간", "밀크씨슬", "타우린", "에너지", "활력", "헛개", // 식품
+            "베개", "족욕기", "안마기", "마사지", "입욕제", "반신욕", "매트리스" // 용품
+        ));
+
+        // 3. 관절/뼈 건강 (영양제 + 보조기구)
+        BENEFIT_KEYWORDS.put("관절/뼈 건강", List.of(
+            "관절", "뼈", "칼슘", "마그네슘", "MSM", "비타민D", "글루코사민", "상어연골", "초록입홍합", "보스웰리아", // 식품
+            "보호대", "지팡이", "보행기", "찜질기", "파스" // 용품
+        ));
+
+        // 4. 눈 건강 (영양제 + 보조기구)
+        BENEFIT_KEYWORDS.put("눈 건강", List.of(
+            "눈", "루테인", "지아잔틴", "오메가3", "아스타잔틴", "빌베리", "안구", // 식품
+            "돋보기", "블루라이트", "온열안대", "눈마사지기" // 용품
+        ));
+
+        // 5. 기억력 개선 (영양제 + 두뇌 활동 교구)
+        BENEFIT_KEYWORDS.put("기억력 개선", List.of(
+            "기억력", "두뇌", "은행잎", "징코", "오메가3", "뇌", // 식품
+            "스도쿠", "퍼즐", "화투", "바둑", "장기", "큐브", "보드게임" // 용품
+        ));
+
+        // 6. 혈행 개선 (영양제 + 건강 신발/기구)
+        BENEFIT_KEYWORDS.put("혈행 개선", List.of(
+            "혈행", "오메가3", "코엔자임Q10", "혈액순환", "감마리놀렌산", "혈압", // 식품
+            "지압", "압박스타킹", "스트레칭", "혈압계" // 용품
+        ));
+
+        // 7. 장 건강
+        BENEFIT_KEYWORDS.put("장 건강", List.of(
+            "유산균", "장", "변비", "프로바이오틱스", "프리바이오틱스", "식이섬유", "알로에", // 식품
+            "좌욕기", "배찜질기" // 용품
+        ));
     }
 
     /**
@@ -148,9 +193,12 @@ public class NaverShoppingService {
 
         for (NaverShopItemDto item : items) {
             String name = stripHtml(item.getTitle());
+            String naverId = item.getProductId(); // 네이버 상품 ID
 
             // 3. 알러지 성분 분석 (자동 태깅)
             List<String> detectedAllergens = extractAllergens(item);
+            // [추가] 효능(Benefit) 태그 자동 분석
+            List<String> detectedBenefits = extractBenefits(item);
 
             // [핵심] 로그인 유저라면, 위험한 상품은 아예 저장도 안 하고 결과에서도 뺌
             if (isLogin) {
@@ -163,19 +211,22 @@ public class NaverShoppingService {
                 }
             }
 
-            // 중복 저장 방지 (이름 기준)
-            // 이미 존재하는 상품이라면 DB에서 가져와서 결과 리스트에 추가 (사용자에게 보여주기 위함)
-            if (productRepository.existsByName(name)) {
-                // 이름으로 찾아서 추가 (여기선 findByName이 없으므로 findByNameContaining 등으로 대체하거나 넘어가야 함)
-                // 현재 Repository에 findByName이 없으므로, 검색 품질을 위해 일단 넘어감.
-                // (만약 이미 저장된 상품을 꼭 보여주고 싶다면 findByName 추가 필요)
-                continue;
+            // Upsert Logic (중복 방지 및 최신화)
+            Product product = productRepository.findByNaverProductId(naverId)
+                    .orElse(new Product());
+
+            if (product.getId() == null) {
+                // [신규 생성]
+                product.setNaverProductId(naverId);
+                product.setTotalSales(0); // 초기화
+                product.setRecentSales(0);
             }
 
-            Product product = new Product();
+            // [공통 업데이트] (가격 변동, 이미지 변경 등 반영)
             product.setName(name);
             product.setPrice(Integer.parseInt(item.getLprice()));
             product.setImageUrl(item.getImage());
+            product.setStatus(ProductStatus.ON_SALE); // 다시 검색되었으므로 판매 중으로 갱신
 
             // 상세 정보 조합
             StringBuilder desc = new StringBuilder();
@@ -184,13 +235,41 @@ public class NaverShoppingService {
             if (item.getCategory1() != null) desc.append("Category: ").append(item.getCategory1()).append(" > ").append(item.getCategory2()).append("\n");
             product.setDescription(desc.toString());
 
+            // 태그 정보 갱신 (기존 정보 덮어쓰기)
             product.setAllergens(detectedAllergens);
+            product.setHealthBenefits(detectedBenefits);
 
             savedProducts.add(productRepository.save(product));
         }
 
         log.info("Imported {} products from Naver for query '{}' (Login: {})", savedProducts.size(), query, isLogin);
         return savedProducts;
+    }
+
+    /**
+     * 상품 정보 텍스트를 분석하여 포함된 기대효과(Benefit) 목록 반환
+     */
+    private List<String> extractBenefits(NaverShopItemDto item) {
+        Set<String> detected = new HashSet<>();
+        StringBuilder sb = new StringBuilder();
+        if (item.getTitle() != null) sb.append(stripHtml(item.getTitle())).append(" ");
+        if (item.getCategory1() != null) sb.append(item.getCategory1()).append(" ");
+        // 필요하다면 브랜드나 제조사도 포함 가능
+
+        String text = sb.toString().toLowerCase(Locale.KOREAN);
+
+        for (Map.Entry<String, List<String>> entry : BENEFIT_KEYWORDS.entrySet()) {
+            String benefitName = entry.getKey(); // "눈 건강"
+            List<String> keywords = entry.getValue(); // ["루테인", "오메가3", ...]
+
+            for (String keyword : keywords) {
+                if (text.contains(keyword.toLowerCase(Locale.KOREAN))) {
+                    detected.add(benefitName);
+                    break; // 해당 효능 발견 시 다음 효능으로
+                }
+            }
+        }
+        return new ArrayList<>(detected);
     }
 
     /**

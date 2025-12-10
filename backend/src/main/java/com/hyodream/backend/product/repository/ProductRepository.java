@@ -8,7 +8,16 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import java.util.List;
 
+import java.time.LocalDateTime;
+import java.util.Optional;
+
 public interface ProductRepository extends JpaRepository<Product, Long> {
+    
+    Optional<Product> findByNaverProductId(String naverProductId);
+
+    // 업데이트된 지 오래된 상품 조회 (배치 처리용)
+    List<Product> findByUpdatedAtBefore(LocalDateTime dateTime);
+
     // 나중에 "당뇨" 태그 가진 상품 찾을 때 씀
     // (JPA가 알아서 만들어줌)
     List<Product> findByHealthBenefitsContaining(String benefit);
@@ -73,5 +82,24 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
                 LIMIT 5
             """, nativeQuery = true)
     List<Product> findSimilarProductsByBenefits(@Param("targetId") Long targetId);
+
+    // [New] 특정 지병(diseaseName)을 가진 유저들이 많이 구매한 상품 TOP 3
+    @Query(value = """
+            SELECT p.* 
+            FROM products p
+            JOIN order_items oi ON p.id = oi.product_id
+            JOIN orders o ON oi.order_id = o.id
+            WHERE o.user_id IN (
+                -- 해당 지병을 가진 유저들의 ID 목록
+                SELECT ud.user_id 
+                FROM user_diseases ud
+                JOIN diseases d ON ud.disease_id = d.id
+                WHERE d.name = :diseaseName
+            )
+            GROUP BY p.id
+            ORDER BY COUNT(oi.id) DESC
+            LIMIT 3
+            """, nativeQuery = true)
+    List<Product> findTopSellingProductsByDisease(@Param("diseaseName") String diseaseName);
 
 }
