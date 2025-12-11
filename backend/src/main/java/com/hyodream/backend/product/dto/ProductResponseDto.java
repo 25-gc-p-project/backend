@@ -1,6 +1,7 @@
 package com.hyodream.backend.product.dto;
 
 import com.hyodream.backend.product.domain.Product;
+import com.hyodream.backend.product.domain.ProductDetail;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Getter;
 import java.util.List;
@@ -40,21 +41,45 @@ public class ProductResponseDto {
 
     @Schema(description = "카테고리 4 (세분류)", example = "홍삼농축액")
     private String category4;
+    
+    // --- [Detail Info] ---
+    @Schema(description = "원가", example = "20000")
+    private int originalPrice;
+    
+    @Schema(description = "할인율", example = "20")
+    private int discountRate;
+    
+    @Schema(description = "판매처", example = "종근당건강")
+    private String seller;
+    
+    @Schema(description = "리뷰 수", example = "150")
+    private long reviewCount;
+    
+    @Schema(description = "평점", example = "4.8")
+    private double averageRating;
 
-    @Schema(description = "효능 태그 (자동 분석)", example = "[\"장 건강\", \"면역력 강화\"]")
+    // [New] AI 감성 분석 결과
+    @Schema(description = "AI 리뷰 분석 - 긍정 비율 (%)", example = "85.5")
+    private double positiveRatio;
+
+    @Schema(description = "AI 리뷰 분석 - 부정 비율 (%)", example = "14.5")
+    private double negativeRatio;
+    
+    // ---------------------
+
+    @Schema(description = "효능 태그", example = "[\"장 건강\", \"면역력 강화\"]")
     private List<String> healthBenefits;
 
-    @Schema(description = "포함된 알레르기 성분 (로그인 유저의 경우 필터링됨)", example = "[\"우유\", \"대두\"]")
+    @Schema(description = "알레르기 성분", example = "[\"우유\", \"대두\"]")
     private List<String> allergens;
 
-    @Schema(description = "추천 사유 (추천 API에서만 값 존재)", example = "최근 보신 '피자'와 비슷한 상품이에요")
+    @Schema(description = "추천 사유", example = "최근 보신 '피자'와 비슷한 상품이에요")
     private String reason;
 
     public void setReason(String reason) {
         this.reason = reason;
     }
 
-    // 엔티티 -> DTO 변환 생성자
     public ProductResponseDto(Product product) {
         this.id = product.getId();
         this.name = product.getName();
@@ -69,5 +94,18 @@ public class ProductResponseDto {
         this.category4 = product.getCategory4();
         this.healthBenefits = product.getHealthBenefits();
         this.allergens = product.getAllergens();
+        
+        if (product.getDetail() != null) {
+            ProductDetail d = product.getDetail();
+            this.originalPrice = d.getOriginalPrice();
+            this.discountRate = d.getDiscountRate();
+            this.seller = d.getSeller();
+            this.reviewCount = d.getReviewCount();
+            this.averageRating = d.getAverageRating();
+            
+            // 감성 분석 결과 매핑
+            this.positiveRatio = d.getPositiveRatio();
+            this.negativeRatio = d.getNegativeRatio();
+        }
     }
 }

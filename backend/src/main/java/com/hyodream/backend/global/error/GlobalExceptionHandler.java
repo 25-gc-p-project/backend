@@ -24,8 +24,8 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleException(Exception e) {
         e.printStackTrace(); // 서버 로그에는 에러 내용 출력 (디버깅용)
 
-        // 클라이언트에게는 "서버 에러"라고만 알려줌 (보안상 상세 내용 숨김)
-        ErrorResponse response = new ErrorResponse(500, "서버 내부 오류가 발생했습니다.");
+        // 디버깅을 위해 에러 메시지 노출
+        ErrorResponse response = new ErrorResponse(500, "서버 에러: " + e.getMessage() + " / " + e.getClass().getName());
         return new ResponseEntity<>(response, HttpStatus.INTERNAL_SERVER_ERROR);
     }
 }

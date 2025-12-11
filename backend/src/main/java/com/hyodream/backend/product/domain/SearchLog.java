@@ -21,10 +21,19 @@ public class SearchLog {
     @Id
     private String keyword; // 검색어 (PK)
 
-    private LocalDateTime lastUpdatedAt; // 마지막으로 네이버 API에서 갱신한 시간
+    // 사용자가 이 키워드를 검색한 마지막 시간 (인기도/최근검색용)
+    private LocalDateTime lastSearchedAt;
 
-    // 편의 메서드
-    public void updateTimestamp() {
-        this.lastUpdatedAt = LocalDateTime.now();
+    // 네이버 API를 호출하여 데이터를 갱신한 마지막 시간 (데이터 최신성용)
+    private LocalDateTime lastApiCallAt;
+
+    // 사용자가 검색했을 때 호출
+    public void recordSearch() {
+        this.lastSearchedAt = LocalDateTime.now();
+    }
+    
+    // API 호출했을 때 호출
+    public void recordApiCall() {
+        this.lastApiCallAt = LocalDateTime.now();
     }
 }

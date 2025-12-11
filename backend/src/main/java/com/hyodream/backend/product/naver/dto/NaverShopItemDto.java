@@ -10,41 +10,34 @@ import lombok.Setter;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class NaverShopItemDto {
 
-    private String title;
+    private String title;       // 상품명
+    private String link;        // 상세 페이지 링크
+    private String image;       // 이미지 URL
 
-    private String link;
-
-    private String image;
-
-    // 최저가
     @JsonProperty("lprice")
-    private String lprice;
+    private String lprice;      // 판매가 (최저가)
 
-    // 최고가
-    @JsonProperty("hprice")
-    private String hprice;
-
-    // 쇼핑몰 이름
-    private String mallName;
-
-    // 상품 ID
     @JsonProperty("productId")
-    private String productId;
+    private String productId;   // 네이버 상품 ID
 
-    // 브랜드 / 제조사
+    private String mallName;    // 판매자 (seller)
+
     private String brand;
     private String maker;
 
     // 카테고리
     @JsonProperty("category1")
     private String category1;
-
     @JsonProperty("category2")
     private String category2;
-
     @JsonProperty("category3")
     private String category3;
-
     @JsonProperty("category4")
     private String category4;
+
+    // --- [New] 확장된 필드 (AI 서버/크롤러 제공) ---
+    private int originalPrice;  // 원가
+    private int discountRate;   // 할인율
+    private long reviewCount;   // 리뷰 수
+    private double rating;      // 평점 (0~5.0)
 }

@@ -2,11 +2,12 @@ package com.hyodream.backend.product.controller;
 
 import com.hyodream.backend.global.util.JwtUtil;
 import com.hyodream.backend.product.domain.EventType;
+import com.hyodream.backend.product.naver.service.NaverShoppingService; // 서비스 Import
+import com.hyodream.backend.product.repository.ProductRepository;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
-import org.springframework.data.redis.connection.stream.RecordId;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.web.bind.annotation.*;
 
@@ -21,7 +22,9 @@ public class EventController {
 
     private final StringRedisTemplate redisTemplate;
     private final JwtUtil jwtUtil;
-    private final com.hyodream.backend.product.repository.ProductRepository productRepository;
+    private final ProductRepository productRepository;
+    // NaverShoppingService 내부에 static 메서드가 있으므로 주입이 필수는 아니지만,
+    // static import를 쓰거나 클래스명으로 바로 접근합니다.
 
     @Operation(summary = "상품 클릭/조회 이벤트 수집", description = "사용자가 상품을 클릭하면 해당 상품의 가장 구체적인 카테고리를 자동 추출하여 실시간 관심사에 반영합니다.")
     @PostMapping("/view")
@@ -29,43 +32,64 @@ public class EventController {
             @Parameter(description = "상품 ID") @RequestParam Long productId,
             @Parameter(description = "이벤트 타입 (CLICK, CART, PURCHASE)") @RequestParam(defaultValue = "CLICK") EventType type,
             @Parameter(description = "비로그인 유저 세션 ID") @RequestHeader(value = "X-Session-Id", required = false) String sessionId,
-            @Parameter(description = "로그인 유저 토큰") @RequestHeader(value = "Authorization", required = false) String token
-    ) {
-        // 1. 상품 정보 조회 및 카테고리 추출
+            @Parameter(description = "로그인 유저 토큰") @RequestHeader(value = "Authorization", required = false) String token) {
         String targetCategory = "기타"; // 기본값
         var productOpt = productRepository.findById(productId);
-        
+
         if (productOpt.isPresent()) {
             var p = productOpt.get();
-            // 가장 구체적인 카테고리 우선 추출 (4 -> 3 -> 2 -> 1)
-            if (p.getCategory4() != null && !p.getCategory4().isEmpty()) targetCategory = p.getCategory4();
-            else if (p.getCategory3() != null && !p.getCategory3().isEmpty()) targetCategory = p.getCategory3();
-            else if (p.getCategory2() != null && !p.getCategory2().isEmpty()) targetCategory = p.getCategory2();
-            else if (p.getCategory1() != null && !p.getCategory1().isEmpty()) targetCategory = p.getCategory1();
-            
-            // 만약 효능(HealthBenefit)이 있다면, 효능을 관심사로 잡는 게 더 강력할 수 있음 (선택 사항)
-            // 여기서는 카테고리 우선으로 하되, 필요시 로직 변경 가능
+
+            // 0. 가장 구체적인 카테고리 확보
+            String categoryToAnalyze = null;
+            if (p.getCategory4() != null && !p.getCategory4().isEmpty())
+                categoryToAnalyze = p.getCategory4();
+            else if (p.getCategory3() != null && !p.getCategory3().isEmpty())
+                categoryToAnalyze = p.getCategory3();
+            else if (p.getCategory2() != null && !p.getCategory2().isEmpty())
+                categoryToAnalyze = p.getCategory2();
+            else if (p.getCategory1() != null && !p.getCategory1().isEmpty())
+                categoryToAnalyze = p.getCategory1();
+
+            // 1순위: 카테고리에서 유추한 효능이 실제 상품 효능 목록에 포함되어 있는지 확인 (가장 정확)
+            // BenefitUtils 대신 NaverShoppingService의 static 메서드 사용
+            String deducedBenefit = (categoryToAnalyze != null)
+                    ? NaverShoppingService.findPrimaryBenefit(categoryToAnalyze)
+                    : null;
+
+            if (deducedBenefit != null && p.getHealthBenefits() != null
+                    && p.getHealthBenefits().contains(deducedBenefit)) {
+                targetCategory = deducedBenefit;
+            }
+            // 2순위: 매칭 실패 시, 상품의 첫 번째 효능 사용
+            else if (p.getHealthBenefits() != null && !p.getHealthBenefits().isEmpty()) {
+                targetCategory = p.getHealthBenefits().get(0);
+            }
+            // 3순위 (단순 유추) 및 4순위 (카테고리명 그대로 사용) 로직
+            // 요청하신대로 3순위(deducedBenefit만으로 결정)는 제거하고,
+            // 효능을 찾지 못했다면 최후의 수단으로 카테고리 이름 자체를 사용
+            else if (categoryToAnalyze != null) {
+                targetCategory = categoryToAnalyze;
+            }
         }
 
-        String userId = sessionId; // 기본값은 세션ID
+        String userId = sessionId;
 
-        // 토큰이 있으면 진짜 username을 꺼냄
         if (token != null && token.startsWith("Bearer ")) {
             String jwt = token.substring(7);
             if (jwtUtil.validateToken(jwt)) {
-                userId = jwtUtil.getUsername(jwt); // "test_user"가 나옴
+                userId = jwtUtil.getUsername(jwt);
             }
         }
 
         if (userId == null)
             userId = "unknown";
 
-        // Redis Stream에 이벤트 발행 (Producer)
+        // Redis Stream에 이벤트 발행
         Map<String, String> fields = new HashMap<>();
         fields.put("userId", userId);
         fields.put("productId", productId.toString());
-        fields.put("category", targetCategory); // 추출한 카테고리 사용
-        fields.put("type", type.name()); // 이벤트 타입 저장 (CLICK, CART 등)
+        fields.put("category", targetCategory);
+        fields.put("type", type.name());
         fields.put("timestamp", String.valueOf(System.currentTimeMillis()));
 
         redisTemplate.opsForStream().add("product-view-stream", fields);

@@ -3,6 +3,7 @@ package com.hyodream.backend.product.repository;
 import com.hyodream.backend.product.domain.Product;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -13,6 +14,10 @@ import java.util.Optional;
 
 public interface ProductRepository extends JpaRepository<Product, Long> {
     
+    // 상세 정보 함께 조회 (N+1 방지)
+    @EntityGraph(attributePaths = {"detail"})
+    Optional<Product> findById(Long id);
+
     Optional<Product> findByNaverProductId(String naverProductId);
 
     // 업데이트된 지 오래된 상품 조회 (배치 처리용)
@@ -34,7 +39,8 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
            "OR p.category1 LIKE %:keyword% " +
            "OR p.category2 LIKE %:keyword% " +
            "OR p.category3 LIKE %:keyword% " +
-           "OR p.category4 LIKE %:keyword%")
+           "OR p.category4 LIKE %:keyword% " +
+           "ORDER BY p.totalSales DESC, p.id DESC")
     List<Product> findByKeywordInBenefitsOrCategories(@Param("keyword") String keyword);
 
     boolean existsByName(String name);
@@ -44,6 +50,7 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
     // Sorting: 내 관심사(:interest)가 healthBenefits에 포함되면 우선순위 0 (상단), 아니면 1 (하단) ->
     // 그 뒤엔 ID 최신순
     @Query("SELECT DISTINCT p FROM Product p " +
+            "LEFT JOIN FETCH p.detail " +
             "WHERE (:isLogin = false OR NOT EXISTS (SELECT 1 FROM p.allergens a WHERE a IN :userAllergies))")
     Page<Product> findAllWithPersonalization(
             @Param("isLogin") boolean isLogin,
@@ -52,6 +59,7 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
 
     // 검색어 포함 + 알러지 필터링
     @Query("SELECT DISTINCT p FROM Product p " +
+            "LEFT JOIN FETCH p.detail " +
             "WHERE p.name LIKE %:keyword% " +
             "AND (:isLogin = false OR NOT EXISTS (SELECT 1 FROM p.allergens a WHERE a IN :userAllergies))")
     Page<Product> findByNameContainingWithPersonalization(

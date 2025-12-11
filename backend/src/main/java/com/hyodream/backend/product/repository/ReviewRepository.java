@@ -12,6 +12,9 @@ public interface ReviewRepository extends JpaRepository<Review, Long> {
     // 내가 쓴 리뷰 목록 조회 (마이페이지용)
     List<Review> findByUserId(Long userId);
 
-    // 중복 작성 방지용
+    // 중복 작성 방지용 (내부 회원)
     boolean existsByUserIdAndProductId(Long userId, Long productId);
+
+    // 중복 수집 방지용 (외부 리뷰)
+    boolean existsByExternalReviewId(String externalReviewId);
 }

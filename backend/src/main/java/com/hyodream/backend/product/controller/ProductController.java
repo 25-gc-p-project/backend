@@ -54,7 +54,18 @@ public class ProductController {
         return ResponseEntity.ok(new PagedModel<>(result));
     }
 
-    @Operation(summary = "상품 상세 조회", description = "상품 ID로 상세 정보를 조회합니다.")
+    @Operation(summary = "상품 상세 조회 (크롤링 & AI 감성 분석)", description = """
+            상품 ID로 상세 정보를 조회합니다. 이 API는 호출 시점에 데이터 최신성을 확인하고 필요한 경우 AI 크롤러와 감성 분석 엔진을 트리거합니다.
+
+            **[상세 정보 갱신 로직 (On-Demand Processing)]**
+            1. **데이터 최신성 확인:** 해당 상품의 상세 정보(`ProductDetail`)가 없거나, 마지막 갱신일로부터 **3일**이 지났는지 확인합니다.
+            2. **AI 크롤러 호출:** 갱신이 필요하다면 AI 서버에 크롤링을 요청하여 최신 상세 정보(원가, 할인율)와 리뷰 데이터를 수집합니다.
+            3. **AI 리뷰 감성 분석 (New):**
+               - 수집된 리뷰 텍스트를 AI 모델에 전송하여 **긍정/부정 비율**을 분석합니다.
+               - 분석 결과(`positiveRatio`, `negativeRatio`)는 DB에 저장되며, 소비자에게 직관적인 구매 지표로 제공됩니다.
+            4. **데이터 동기화:** 크롤링된 정보와 분석 결과를 `ProductDetail` 및 `Review` 테이블에 저장합니다.
+            5. **응답 반환:** 최신화된 상세 정보와 감성 분석 결과를 포함한 `ProductResponseDto`를 반환합니다.
+            """)
     @GetMapping("/{id}")
     public ResponseEntity<ProductResponseDto> getProduct(@PathVariable Long id) {
         return ResponseEntity.ok(productService.getProduct(id));
@@ -92,21 +103,20 @@ public class ProductController {
         return ResponseEntity.ok(productService.getRecommendedProducts(identifier, isLogin));
     }
 
-    @Operation(summary = "상품 키워드 검색", description = """
-            키워드로 상품을 검색하고, 네이버 쇼핑 API 결과를 실시간으로 캐싱합니다.
+    @Operation(summary = "상품 키워드 검색 (통합 검색)", description = """
+            키워드로 상품을 검색하고, 네이버 쇼핑 API 결과를 실시간으로 캐싱합니다. (Cache-Aside 패턴 적용)
 
             **[검색 및 데이터 동기화 로직]**
-            1. **API 연동:** 네이버 쇼핑 API를 통해 **상위 20개** 상품을 실시간 조회합니다.
-            2. **알러지 필터링 (로그인 회원):** 회원의 알러지 정보와 일치하는 유해 상품은 **자동 필터링**되어 결과에서 제외되며, DB에도 저장되지 않습니다. (비회원은 필터링 없음)
-            3. **데이터 최신화 (Upsert):**
-               - **신규 상품:** DB에 새로 등록되며 판매량은 0으로 초기화됩니다.
-               - **기존 상품:** 이미 존재하는 상품(`naverProductId`)은 가격, 이미지, 판매 상태(`ON_SALE`), 상세 정보를 최신으로 업데이트합니다. (누적 판매량은 유지)
-            4. **자동 태깅:** 상품명과 카테고리를 분석하여 '알러지 성분(19종)'과 '기대 효능(7종)'을 자동으로 추출해 태깅합니다.
+            1. **Cache-Aside 전략:**
+               - 해당 키워드로 검색된 기록(`SearchLog`)이 없거나, 마지막 API 호출(`lastApiCallAt`)로부터 **24시간**이 지났다면 네이버 쇼핑 API를 호출하여 데이터를 최신화합니다.
+               - 그 외의 경우(단순 인기 검색어 등)에는 DB에 저장된 데이터를 바로 반환하여 응답 속도를 높입니다.
+            2. **데이터 적재 (Light Info):**
+               - 검색 목록 노출에 필요한 **기본 정보**(상품명, 가격, 이미지, 브랜드, 카테고리)만 `Product` 테이블에 저장합니다.
+               - 무거운 상세 정보(원가, 리뷰 상세 등)는 저장하지 않습니다. (상세 조회 시점에 처리)
+            3. **알러지 필터링:** 로그인 회원의 경우, 본인의 알러지 유발 성분이 포함된 상품은 검색 결과 및 DB 저장 과정에서 **자동 제외**됩니다.
 
-            **[데이터 관리 정책 (Background)]**
-            - **자동 정리:** 매일 새벽 4시, **30일 이상** 검색/업데이트되지 않은 상품을 정리합니다.
-              - 판매 이력이 **있는** 상품: '판매 중지(STOP_SELLING)' 상태로 변경 (주문 내역 보존)
-              - 판매 이력이 **없는** 상품: DB에서 **영구 삭제** (용량 확보)
+            **[자동 갱신 스케줄링]**
+            - **검색어 갱신:** 매일 새벽 3시, 3일 이상 API 호출이 없었던 검색어에 대해 자동으로 API를 호출하여 상품 정보를 최신화합니다.
             """)
     @GetMapping("/search")
     public ResponseEntity<PagedModel<ProductResponseDto>> searchProducts(

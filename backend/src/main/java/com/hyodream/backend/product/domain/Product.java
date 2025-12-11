@@ -17,26 +17,25 @@ public class Product extends BaseTimeEntity {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    // 네이버 쇼핑 고유 ID (중복 저장 방지 및 업데이트 키)
     @Column(unique = true)
     private String naverProductId;
 
     @Column(nullable = false)
-    private String name; // 상품명
+    private String name;
 
     @Column(nullable = false)
-    private int price; // 가격
+    private int price; // 현재 판매가
 
     @Enumerated(EnumType.STRING)
-    private ProductStatus status = ProductStatus.ON_SALE; // 판매 상태
+    private ProductStatus status = ProductStatus.ON_SALE;
 
     @Column(columnDefinition = "TEXT")
-    private String description; // 상세 설명
+    private String description; // 간단 설명
 
-    private String imageUrl; // 이미지 주소
+    private String imageUrl; // 썸네일
 
     @Column(columnDefinition = "TEXT")
-    private String itemUrl; // 상품 원본 링크 (네이버 쇼핑 상세 페이지)
+    private String itemUrl; // 구매 링크
 
     // 상세 분류 정보
     private String brand;
@@ -46,31 +45,28 @@ public class Product extends BaseTimeEntity {
     private String category3;
     private String category4;
 
-    // 어르신 맞춤 정보
-    private String volume; // 용량 (예: 120정)
-    private String sizeInfo; // 알약 크기
+    private String volume;
+    private String sizeInfo;
 
-    // 전체 누적 판매량
+    // 통계 정보 (목록용)
     private int totalSales = 0;
+    private int recentSales = 0; 
+    
+    // 상세 정보와 1:1 매핑 (필요할 때만 로딩, Optional)
+    @OneToOne(mappedBy = "product", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
+    private ProductDetail detail;
 
-    // 최근 한 달 판매량 (인기순 정렬용)
-    private int recentSales = 0;
-
-    // 이 상품의 효능 (AI 추천용 태그)
-    // "관절", "당뇨" 같은 단순 문자열 리스트이므로 ElementCollection 사용
-    // 별도 테이블(product_benefits)로 저장되지만, Product랑 한 몸 취급 (LifeCycle 같음)
+    // 태그 정보 (유지)
     @ElementCollection(fetch = FetchType.EAGER)
     @CollectionTable(name = "product_benefits", joinColumns = @JoinColumn(name = "product_id"))
     @Column(name = "benefit")
     private List<String> healthBenefits = new ArrayList<>();
 
-    // 알레르기 성분 (예: "땅콩", "우유")
     @ElementCollection(fetch = FetchType.EAGER)
     @CollectionTable(name = "product_allergens", joinColumns = @JoinColumn(name = "product_id"))
     @Column(name = "allergen")
     private List<String> allergens = new ArrayList<>();
 
-    // 생성 편의 메서드
     public void addBenefit(String benefit) {
         this.healthBenefits.add(benefit);
     }

@@ -15,10 +15,12 @@ import com.hyodream.backend.user.repository.DiseaseRepository;
 import com.hyodream.backend.user.repository.HealthGoalRepository;
 import com.hyodream.backend.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class UserService {
@@ -43,12 +45,14 @@ public class UserService {
     // 건강 정보 저장/수정
     @Transactional
     public void updateHealthInfo(String username, HealthInfoRequestDto dto) {
+        log.info("🏥 Updating health info for user: {}", username);
         User user = userRepository.findByUsername(username)
                 .orElseThrow(() -> new RuntimeException("사용자를 찾을 수 없습니다."));
 
         // 지병 처리
         user.getDiseases().clear();
         if (dto.getDiseaseNames() != null) {
+            log.info("🏥 Processing diseases: {}", dto.getDiseaseNames());
             for (String name : dto.getDiseaseNames()) {
                 Disease d = diseaseRepository.findByName(name)
                         .orElseThrow(() -> new RuntimeException("지병을 찾을 수 없음: " + name));
@@ -59,22 +63,31 @@ public class UserService {
         // 알레르기 처리
         user.getAllergies().clear();
         if (dto.getAllergyNames() != null) {
+            log.info("🥕 Processing allergies: {}", dto.getAllergyNames());
             for (String name : dto.getAllergyNames()) {
                 Allergy a = allergyRepository.findByName(name)
                         .orElseThrow(() -> new RuntimeException("알레르기를 찾을 수 없음: " + name));
-                user.addAllergy(UserAllergy.createUserAllergy(a));
+                log.info("   -> Found allergy entity: {}", a.getName());
+                
+                UserAllergy ua = UserAllergy.createUserAllergy(a);
+                user.addAllergy(ua);
             }
         }
 
         // 기대효과 처리
         user.getHealthGoals().clear();
         if (dto.getHealthGoalNames() != null) {
+            log.info("🎯 Processing health goals: {}", dto.getHealthGoalNames());
             for (String name : dto.getHealthGoalNames()) {
                 HealthGoal h = healthGoalRepository.findByName(name)
                         .orElseThrow(() -> new RuntimeException("기대효과를 찾을 수 없음: " + name));
                 user.addHealthGoal(UserHealthGoal.createUserHealthGoal(h));
             }
         }
+        
+        User savedUser = userRepository.saveAndFlush(user); // 변경 사항 즉시 DB 반영
+        log.info("✅ Health info updated. Allergies: {}, Diseases: {}, Goals: {}", 
+                savedUser.getAllergies().size(), savedUser.getDiseases().size(), savedUser.getHealthGoals().size());
     }
 
     // 내 정보 조회 (컨트롤러에서 필요해서 추가)

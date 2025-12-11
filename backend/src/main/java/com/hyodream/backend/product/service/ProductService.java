@@ -3,8 +3,10 @@ package com.hyodream.backend.product.service;
 import com.hyodream.backend.global.client.AiClient;
 import com.hyodream.backend.product.domain.Product;
 import com.hyodream.backend.product.domain.SearchLog;
+import com.hyodream.backend.product.dto.AiProductDetailDto;
 import com.hyodream.backend.product.dto.ProductRequestDto;
 import com.hyodream.backend.product.dto.ProductResponseDto;
+import com.hyodream.backend.product.dto.ReviewRequestDto;
 import com.hyodream.backend.product.naver.service.NaverShoppingService;
 import com.hyodream.backend.product.repository.ProductRepository;
 import com.hyodream.backend.product.repository.SearchLogRepository;
@@ -42,11 +44,12 @@ public class ProductService {
     private final SearchLogRepository searchLogRepository;
     private final NaverShoppingService naverShoppingService;
     private final AiClient aiClient;
+    private final ReviewService reviewService; // [New] 리뷰 저장을 위해 주입
 
     private final UserRepository userRepository;
     private final StringRedisTemplate redisTemplate;
 
-    // 상품 등록 (관리자용 - 나중에 쿠팡 API로 대체될 부분)
+    // 상품 등록 (관리자용)
     @Transactional
     public void createProduct(ProductRequestDto dto) {
         Product product = new Product();
@@ -54,7 +57,7 @@ public class ProductService {
         product.setPrice(dto.getPrice());
         product.setDescription(dto.getDescription());
         product.setImageUrl(dto.getImageUrl());
-        product.setItemUrl(dto.getItemUrl()); // 상품 URL
+        product.setItemUrl(dto.getItemUrl());
         product.setBrand(dto.getBrand());
         product.setMaker(dto.getMaker());
         product.setCategory1(dto.getCategory1());
@@ -64,144 +67,213 @@ public class ProductService {
         product.setVolume(dto.getVolume());
         product.setSizeInfo(dto.getSizeInfo());
 
-        // 효능 태그 저장
         if (dto.getHealthBenefits() != null) {
             for (String benefit : dto.getHealthBenefits()) {
                 product.addBenefit(benefit);
             }
         }
-
-        // 알레르기 정보 저장 로직
         if (dto.getAllergens() != null) {
             for (String allergen : dto.getAllergens()) {
-                product.addAllergen(allergen); // 엔티티에 만들어둔 메서드 호출
+                product.addAllergen(allergen);
             }
         }
-
         productRepository.save(product);
     }
 
-    // 전체 상품 목록 조회 (알레르기 필터링 + 인기순 + 실시간 주입)
+    // 전체 상품 목록 조회
     @Transactional(readOnly = true)
     public Page<ProductResponseDto> getAllProducts(int page, int size, String sort, String identifier) {
-
-        // A. 정렬 기준 결정 (기본값: 인기순)
         Sort sortCondition = Sort.by("recentSales").descending().and(Sort.by("id").descending());
-
         if ("latest".equals(sort)) {
-            sortCondition = Sort.by("id").descending(); // 최신순 요청 시 변경
+            sortCondition = Sort.by("id").descending();
         }
 
-        // B. 유저 알레르기 정보 가져오기
         boolean isLogin = false;
         List<String> userAllergies = new ArrayList<>();
-
         if (identifier != null && !identifier.equals("unknown") && !identifier.startsWith("session:")) {
-            // 로그인 유저(username)인 경우 DB 조회
             userRepository.findByUsername(identifier).ifPresent(user -> {
                 user.getAllergies().forEach(ua -> userAllergies.add(ua.getAllergy().getName()));
             });
-            if (!userAllergies.isEmpty())
-                isLogin = true;
+            if (!userAllergies.isEmpty()) isLogin = true;
         }
-        // 쿼리 에러 방지용 더미 데이터
-        if (userAllergies.isEmpty())
-            userAllergies.add("NONE");
+        if (userAllergies.isEmpty()) userAllergies.add("NONE");
 
-        // C. 기본 목록 조회 (알레르기 필터링 + 정렬 적용)
         Pageable pageable = PageRequest.of(page, size, sortCondition);
         Page<Product> productPage = productRepository.findAllWithPersonalization(isLogin, userAllergies, pageable);
 
         List<Product> originalList = productPage.getContent();
         List<Product> resultList = new ArrayList<>(originalList);
 
-        // D. [첫 페이지]일 때만 실시간 관심사 5개 '강제 주입'
         if (page == 0 && identifier != null && !identifier.equals("unknown")) {
             String redisKey = "interest:user:" + identifier;
             Set<String> topInterests = redisTemplate.opsForZSet().reverseRange(redisKey, 0, 0);
 
             if (topInterests != null && !topInterests.isEmpty()) {
                 String interestCategory = topInterests.iterator().next();
-
-                // 관심 상품 검색 (효능 OR 카테고리)
                 List<Product> interestProducts = productRepository
                         .findByKeywordInBenefitsOrCategories(interestCategory);
 
-                // 상위 3개만 주입 (개수 제한)
                 if (interestProducts.size() > 3) {
                     interestProducts = interestProducts.subList(0, 3);
                 }
-
-                // 맨 앞에 삽입
                 for (int i = interestProducts.size() - 1; i >= 0; i--) {
                     resultList.add(0, interestProducts.get(i));
                 }
             }
         }
 
-        // E. 중복 제거 및 DTO 변환
         List<Long> addedIds = new ArrayList<>();
         List<ProductResponseDto> finalDtos = new ArrayList<>();
-
         for (Product p : resultList) {
             if (!addedIds.contains(p.getId())) {
                 finalDtos.add(new ProductResponseDto(p));
                 addedIds.add(p.getId());
             }
-            if (finalDtos.size() >= size)
-                break;
+            if (finalDtos.size() >= size) break;
         }
-
         return new PageImpl<>(finalDtos, pageable, productPage.getTotalElements());
     }
 
-    // 상품 상세 조회 (ID로 찾기)
-    @Transactional(readOnly = true)
+    // [Modified] 상품 상세 조회 (TTL 체크 -> AI 크롤링 -> DB 업데이트)
+    @Transactional
     public ProductResponseDto getProduct(Long id) {
         Product product = productRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("상품이 없습니다."));
+
+        // Detail 엔티티 준비 (없으면 생성)
+        if (product.getDetail() == null) {
+            product.setDetail(new com.hyodream.backend.product.domain.ProductDetail(product));
+        }
+        com.hyodream.backend.product.domain.ProductDetail detailEntity = product.getDetail();
+
+        // 1. 크롤링 갱신 체크 (마지막 갱신으로부터 3일 지났거나, 상세 정보가 아예 없는 경우)
+        boolean needUpdate = false;
+        if (detailEntity.getLastCrawledAt() == null) {
+            needUpdate = true;
+        } else if (detailEntity.getLastCrawledAt().isBefore(LocalDateTime.now().minusDays(3))) {
+            needUpdate = true;
+        }
+
+        if (needUpdate && product.getItemUrl() != null && !product.getItemUrl().isEmpty()) {
+            try {
+                // 2. AI 서버에 크롤링 요청
+                log.info("🔍 Requesting crawling for product ID: {}", id);
+                AiProductDetailDto crawledData = aiClient.getProductDetail(new AiClient.CrawlRequest(product.getItemUrl()));
+
+                if (crawledData != null) {
+                    // 3. 상품 상세 정보 업데이트 (Detail 엔티티)
+                    detailEntity.updateCrawledData(
+                            crawledData.getOriginalPrice(),
+                            crawledData.getDiscountRate(),
+                            crawledData.getSeller(),
+                            crawledData.getReviewCount(),
+                            crawledData.getRating()
+                    );
+                    
+                    // Cascade 저장 (Product 저장 시 Detail도 저장됨)
+                    productRepository.save(product);
+
+                    // 4. 리뷰 데이터 저장
+                    List<String> reviewContents = new ArrayList<>();
+                    if (crawledData.getReviews() != null) {
+                        for (AiProductDetailDto.CrawledReviewDto r : crawledData.getReviews()) {
+                            ReviewRequestDto reviewDto = new ReviewRequestDto();
+                            reviewDto.setProductId(product.getId());
+                            reviewDto.setExternalReviewId(r.getExternalReviewId());
+                            reviewDto.setAuthorName(r.getAuthorName());
+                            reviewDto.setContent(r.getContent());
+                            reviewDto.setScore(r.getScore());
+                            reviewDto.setProductOption(r.getProductOption());
+                            reviewDto.setImages(r.getImages());
+                            
+                            reviewService.saveCrawledReview(reviewDto);
+                            
+                            // 감성 분석을 위해 내용 수집
+                            if (r.getContent() != null && !r.getContent().isBlank()) {
+                                reviewContents.add(r.getContent());
+                            }
+                        }
+                    }
+                    
+                    // 5. [New] AI 감성 분석 요청
+                    if (!reviewContents.isEmpty()) {
+                        try {
+                            log.info("🧠 Requesting sentiment analysis for {} reviews...", reviewContents.size());
+                            AiClient.AiSentimentResponse sentiment = aiClient.analyzeReviews(new AiClient.SentimentRequest(reviewContents));
+                            
+                            detailEntity.updateSentimentAnalysis(
+                                sentiment.positivePercent(),
+                                sentiment.negativePercent(),
+                                sentiment.totalReviews()
+                            );
+                            // Detail 정보 다시 저장 (감성 분석 결과 반영)
+                            productRepository.save(product);
+                            log.info("✅ Sentiment analysis updated: Positive={}%, Negative={}%", sentiment.positivePercent(), sentiment.negativePercent());
+                        } catch (Exception e) {
+                            log.error("⚠️ Sentiment analysis failed: {}", e.getMessage());
+                        }
+                    }
+
+                    log.info("✅ Crawling updated successfully for product ID: {}", id);
+                }
+            } catch (Exception e) {
+                log.error("⚠️ Failed to crawl product details (ID: {}): {}", id, e.getMessage());
+                // 크롤링 실패해도 기존 데이터로 반환 (서비스 장애 방지)
+            }
+        }
+
         return new ProductResponseDto(product);
     }
 
-    // AI + 실시간 + 유저 기대효과 하이브리드 추천 (로그인 유저 전용)
+    // AI + 실시간 + 유저 기대효과 하이브리드 추천
     @Transactional(readOnly = true)
     public com.hyodream.backend.product.dto.RecommendationResponseDto getRecommendedProducts(String identifier, boolean isLogin) {
-        com.hyodream.backend.product.dto.RecommendationResponseDto response = new com.hyodream.backend.product.dto.RecommendationResponseDto();
-        Set<Long> addedIds = new HashSet<>(); // 전체 섹션 통합 중복 방지용
+        // ... (기존 추천 로직 유지) ...
+        return getRecommendedProductsInternal(identifier, isLogin);
+    }
 
-        // [A] 실시간 행동 기반 추천 (Quota: 4개)
+    // 추천 로직 내부 메서드로 분리 (가독성 위해)
+    private com.hyodream.backend.product.dto.RecommendationResponseDto getRecommendedProductsInternal(String identifier, boolean isLogin) {
+        com.hyodream.backend.product.dto.RecommendationResponseDto response = new com.hyodream.backend.product.dto.RecommendationResponseDto();
+        Set<Long> addedIds = new HashSet<>();
+
+        // Real-time
         try {
             String redisKey = "interest:user:" + identifier;
             Set<String> topInterests = redisTemplate.opsForZSet().reverseRange(redisKey, 0, 0);
-
+            
             if (topInterests != null && !topInterests.isEmpty()) {
                 String hotCategory = topInterests.iterator().next();
+                log.info("🔥 Real-time Interest Detected for user '{}': {}", identifier, hotCategory);
+                
                 List<Product> candidates = productRepository.findByKeywordInBenefitsOrCategories(hotCategory);
+                log.info("   -> Found {} candidate products for interest '{}'", candidates.size(), hotCategory);
+                
                 List<ProductResponseDto> sectionProducts = new ArrayList<>();
-
                 int count = 0;
                 for (Product p : candidates) {
                     if (count >= 4) break;
                     if (addedIds.contains(p.getId())) continue;
-
                     ProductResponseDto dto = new ProductResponseDto(p);
-                    // 개별 reason도 남겨두지만, 섹션 타이틀이 주된 설명임
                     dto.setReason("최근 관심사 '" + hotCategory + "' 관련");
                     sectionProducts.add(dto);
                     addedIds.add(p.getId());
                     count++;
                 }
-                
                 if (!sectionProducts.isEmpty()) {
                     response.setRealTime(new com.hyodream.backend.product.dto.RecommendationSection(
                             "최근 보신 '" + hotCategory + "' 관련 상품", sectionProducts));
+                    log.info("   -> Added Real-time section with {} products", sectionProducts.size());
+                } else {
+                    log.warn("   -> Real-time candidates were found but filtered out (duplicates or empty).");
                 }
+            } else {
+                log.info("ℹ️ No Real-time Interest found in Redis for user '{}' (Key: {})", identifier, redisKey);
             }
         } catch (Exception e) {
-            log.warn("Redis Recommendation Failed: {}", e.getMessage());
+            log.error("⚠️ Real-time recommendation error: {}", e.getMessage());
         }
 
-        // 초기화 (null 방지)
         response.setHealthGoals(new ArrayList<>());
         response.setDiseases(new ArrayList<>());
 
@@ -210,25 +282,22 @@ public class ProductService {
                 User user = userRepository.findByUsername(identifier)
                         .orElseThrow(() -> new RuntimeException("사용자 없음"));
 
-                // [B] 유저 기대효과(HealthGoal) 기반 추천 (Quota: 목표당 2개)
+                // Health Goals
                 if (user.getHealthGoals() != null) {
                     for (var userGoal : user.getHealthGoals()) {
                         String goalName = userGoal.getHealthGoal().getName();
                         List<Product> candidates = productRepository.findByHealthBenefitsContaining(goalName);
                         List<ProductResponseDto> sectionProducts = new ArrayList<>();
-
                         int count = 0;
                         for (Product p : candidates) {
                             if (count >= 2) break;
                             if (addedIds.contains(p.getId())) continue;
-
                             ProductResponseDto dto = new ProductResponseDto(p);
                             dto.setReason("목표: " + goalName);
                             sectionProducts.add(dto);
                             addedIds.add(p.getId());
                             count++;
                         }
-
                         if (!sectionProducts.isEmpty()) {
                             response.getHealthGoals().add(new com.hyodream.backend.product.dto.RecommendationSection(
                                     "고객님의 '" + goalName + "' 관리를 위한 추천", sectionProducts));
@@ -236,25 +305,22 @@ public class ProductService {
                     }
                 }
 
-                // [C] 지병(Disease) 기반 추천 (Quota: 지병당 2개)
+                // Diseases
                 if (user.getDiseases() != null) {
                     for (var userDisease : user.getDiseases()) {
                         String diseaseName = userDisease.getDisease().getName();
                         List<Product> candidates = productRepository.findTopSellingProductsByDisease(diseaseName);
                         List<ProductResponseDto> sectionProducts = new ArrayList<>();
-
                         int count = 0;
                         for (Product p : candidates) {
                             if (count >= 2) break;
                             if (addedIds.contains(p.getId())) continue;
-
                             ProductResponseDto dto = new ProductResponseDto(p);
                             dto.setReason("같은 '" + diseaseName + "' 환우들의 선택");
                             sectionProducts.add(dto);
                             addedIds.add(p.getId());
                             count++;
                         }
-
                         if (!sectionProducts.isEmpty()) {
                             response.getDiseases().add(new com.hyodream.backend.product.dto.RecommendationSection(
                                     "'" + diseaseName + "' 환우들이 많이 선택한 상품", sectionProducts));
@@ -262,7 +328,7 @@ public class ProductService {
                     }
                 }
 
-                // [D] AI 기반 추천 (Quota: 3개 고정)
+                // AI
                 try {
                     HealthInfoRequestDto requestDto = new HealthInfoRequestDto();
                     requestDto.setDiseaseNames(user.getDiseases().stream().map(d -> d.getDisease().getName()).toList());
@@ -274,17 +340,13 @@ public class ProductService {
 
                     if (aiProductIds != null && !aiProductIds.isEmpty()) {
                         List<Product> aiCandidates = productRepository.findAllById(aiProductIds);
-                        
-                        // ID 순서 유지를 위한 매핑
                         Map<Long, Product> productMap = aiCandidates.stream()
                                 .collect(Collectors.toMap(Product::getId, p -> p));
-                        
                         List<ProductResponseDto> sectionProducts = new ArrayList<>();
                         int count = 0;
                         for (Long id : aiProductIds) {
-                            if (count >= 3) break; 
+                            if (count >= 3) break;
                             if (addedIds.contains(id)) continue;
-                            
                             Product p = productMap.get(id);
                             if (p != null) {
                                 ProductResponseDto dto = new ProductResponseDto(p);
@@ -294,134 +356,89 @@ public class ProductService {
                                 count++;
                             }
                         }
-                        
                         if (!sectionProducts.isEmpty()) {
                             response.setAi(new com.hyodream.backend.product.dto.RecommendationSection(
                                     "AI가 분석한 맞춤 상품", sectionProducts));
                         }
                     }
-                } catch (Exception e) {
-                    log.warn("AI Recommendation Failed: {}", e.getMessage());
-                }
-
-            } catch (Exception e) {
-                log.warn("DB Recommendation Failed (User Load Error): {}", e.getMessage());
-            }
+                } catch (Exception e) {}
+            } catch (Exception e) {}
         }
-
         return response;
     }
 
-    // 상품 검색 기능 (통합 검색: Cache-Aside 패턴 적용)
-    // 읽기 전용 제거 -> Import 때문에 쓰기 트랜잭션 필요
+    // 상품 검색
     @Transactional
     public Page<ProductResponseDto> searchProducts(String keyword, int page, int size, String sort) {
-        if (keyword == null || keyword.trim().isEmpty()) {
-            return Page.empty(); // 빈 리스트 대신 빈 페이지 반환
-        }
+        if (keyword == null || keyword.trim().isEmpty()) return Page.empty();
 
-        // 1. [Cache-Aside] 네이버 API를 통한 데이터 최신화 확인
         try {
             SearchLog log = searchLogRepository.findById(keyword).orElse(null);
-            boolean needUpdate = false;
+            boolean needApiCall = false;
 
             if (log == null) {
-                needUpdate = true; // 최초 검색
-            } else if (log.getLastUpdatedAt().isBefore(LocalDateTime.now().minusHours(24))) {
-                needUpdate = true; // TTL 만료 (24시간 경과)
-            }
-
-            if (needUpdate) {
-                // 네이버 API 호출하여 DB 적재 (필터링 로직 포함)
-                // 주의: importNaverProducts 내부에서 현재 유저 컨텍스트를 타므로, 
-                // 로그인 유저의 알러지 상품은 저장되지 않음.
-                naverShoppingService.importNaverProducts(keyword);
-
-                // 로그 갱신
-                if (log == null) {
-                    log = new SearchLog(keyword, LocalDateTime.now());
-                } else {
-                    log.updateTimestamp();
+                log = new SearchLog(keyword, LocalDateTime.now(), LocalDateTime.now());
+                needApiCall = true;
+            } else {
+                log.recordSearch();
+                if (log.getLastApiCallAt() == null || log.getLastApiCallAt().isBefore(LocalDateTime.now().minusHours(24))) {
+                    needApiCall = true;
                 }
-                searchLogRepository.save(log);
-                System.out.println("✅ [Cache-Aside] Updated DB from Naver for keyword: " + keyword);
             }
+
+            if (needApiCall) {
+                naverShoppingService.importNaverProducts(keyword);
+                log.recordApiCall();
+            }
+            searchLogRepository.save(log);
         } catch (Exception e) {
-            // 외부 API 장애 시에도 기존 DB 데이터로 검색 진행 (Fallback)
             System.err.println("⚠️ Naver Import Failed: " + e.getMessage());
         }
 
-        // 2. DB 조회 (로그인 여부 및 알러지 필터링 적용)
         boolean isLogin = false;
         List<String> userAllergies = new ArrayList<>();
-
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         if (auth != null && auth.isAuthenticated() && !"anonymousUser".equals(auth.getPrincipal())) {
             String username = auth.getName();
             userRepository.findByUsername(username).ifPresent(user -> {
                 user.getAllergies().forEach(ua -> userAllergies.add(ua.getAllergy().getName()));
             });
-            if (!userAllergies.isEmpty()) {
-                isLogin = true;
-            }
+            if (!userAllergies.isEmpty()) isLogin = true;
         }
-        
-        // 쿼리 에러 방지용 더미 데이터
-        if (userAllergies.isEmpty()) {
-            userAllergies.add("NONE");
-        }
+        if (userAllergies.isEmpty()) userAllergies.add("NONE");
 
-        // 정렬 기준 적용
-        Sort sortCondition = Sort.by("id").descending(); // 기본: 최신순
+        Sort sortCondition = Sort.by("id").descending();
         if ("popular".equals(sort)) {
             sortCondition = Sort.by("recentSales").descending().and(Sort.by("id").descending());
         }
 
         Pageable pageable = PageRequest.of(page, size, sortCondition);
-
-        // 안전한 검색 쿼리 실행
         return productRepository.findByNameContainingWithPersonalization(keyword, isLogin, userAllergies, pageable)
                 .map(ProductResponseDto::new);
     }
 
-    // 연관 상품 추천 (함께 많이 산 상품 + 고도화된 Fallback)
+    // 연관 상품 추천
     @Transactional(readOnly = true)
     public List<ProductResponseDto> getRelatedProducts(Long productId) {
-        // 상품 존재 확인
-        if (!productRepository.existsById(productId)) {
-            return new ArrayList<>();
-        }
-
-        // [우선순위] 함께 많이 산 상품 (협업 필터링)
+        if (!productRepository.existsById(productId)) return new ArrayList<>();
         List<Product> relatedProducts = productRepository.findFrequentlyBoughtTogether(productId);
-
-        // [Fallback] 데이터 부족 시 -> "태그 유사도" 높은 순 추천 (콘텐츠 기반 필터링)
         if (relatedProducts.isEmpty()) {
             relatedProducts = productRepository.findSimilarProductsByBenefits(productId);
         }
-        // 결과 반환 (DTO 변환)
-        return relatedProducts.stream()
-                .map(ProductResponseDto::new)
-                .collect(Collectors.toList());
+        return relatedProducts.stream().map(ProductResponseDto::new).collect(Collectors.toList());
     }
 
-    // 판매량 증가 (주문 시 호출됨)
     @Transactional
     public void increaseTotalSales(Long productId, int count) {
         Product product = productRepository.findById(productId)
                 .orElseThrow(() -> new RuntimeException("상품 없음"));
-
-        // 누적 판매량 증가
         product.setTotalSales(product.getTotalSales() + count);
     }
 
-    // 판매량 감소 (주문 취소 시 호출)
     @Transactional
     public void decreaseTotalSales(Long productId, int count) {
         Product product = productRepository.findById(productId)
                 .orElseThrow(() -> new RuntimeException("상품 없음"));
-
-        // 0보다 작아지면 안 되므로 방어 로직 추가
         if (product.getTotalSales() >= count) {
             product.setTotalSales(product.getTotalSales() - count);
         } else {
