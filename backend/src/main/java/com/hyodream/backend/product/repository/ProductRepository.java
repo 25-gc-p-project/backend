@@ -120,4 +120,10 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
             """, nativeQuery = true)
     List<Product> findTopSellingProductsByDisease(@Param("diseaseName") String diseaseName);
 
+    // AI 추천 후보군 (인기순 30개)
+    List<Product> findTop30ByOrderByRecentSalesDesc();
+
+    // AI 추천 후보군 (신상품순 20개)
+    List<Product> findTop20ByOrderByCreatedAtDesc();
+
 }

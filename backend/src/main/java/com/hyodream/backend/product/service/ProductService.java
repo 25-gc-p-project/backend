@@ -4,6 +4,7 @@ import com.hyodream.backend.global.client.AiClient;
 import com.hyodream.backend.product.domain.Product;
 import com.hyodream.backend.product.domain.SearchLog;
 import com.hyodream.backend.product.dto.AiProductDetailDto;
+import com.hyodream.backend.product.dto.AiRecommendationRequestDto;
 import com.hyodream.backend.product.dto.ProductRequestDto;
 import com.hyodream.backend.product.dto.ProductResponseDto;
 import com.hyodream.backend.product.dto.ReviewRequestDto;
@@ -330,10 +331,29 @@ public class ProductService {
 
                 // AI
                 try {
-                    HealthInfoRequestDto requestDto = new HealthInfoRequestDto();
-                    requestDto.setDiseaseNames(user.getDiseases().stream().map(d -> d.getDisease().getName()).toList());
-                    requestDto.setAllergyNames(user.getAllergies().stream().map(a -> a.getAllergy().getName()).toList());
-                    requestDto.setHealthGoalNames(user.getHealthGoals().stream().map(h -> h.getHealthGoal().getName()).toList());
+                    // 1. 후보군 생성 (인기 30 + 신규 20)
+                    List<Product> popular = productRepository.findTop30ByOrderByRecentSalesDesc();
+                    List<Product> newProducts = productRepository.findTop20ByOrderByCreatedAtDesc();
+
+                    Set<Product> candidatePool = new HashSet<>(popular);
+                    candidatePool.addAll(newProducts);
+
+                    List<AiRecommendationRequestDto.CandidateProductDto> candidateDtos = candidatePool.stream()
+                            .map(p -> new AiRecommendationRequestDto.CandidateProductDto(
+                                    p.getId(),
+                                    p.getName(),
+                                    p.getHealthBenefits(),
+                                    p.getAllergens(),
+                                    p.getCategory1()
+                            ))
+                            .toList();
+
+                    AiRecommendationRequestDto requestDto = AiRecommendationRequestDto.builder()
+                            .diseaseNames(user.getDiseases().stream().map(d -> d.getDisease().getName()).toList())
+                            .allergyNames(user.getAllergies().stream().map(a -> a.getAllergy().getName()).toList())
+                            .healthGoalNames(user.getHealthGoals().stream().map(h -> h.getHealthGoal().getName()).toList())
+                            .candidates(candidateDtos)
+                            .build();
 
                     var aiResponse = aiClient.getRecommendations(requestDto);
                     List<Long> aiProductIds = aiResponse.productIds();
@@ -361,7 +381,9 @@ public class ProductService {
                                     "AI가 분석한 맞춤 상품", sectionProducts));
                         }
                     }
-                } catch (Exception e) {}
+                } catch (Exception e) {
+                    log.error("AI Recommendation Error: {}", e.getMessage());
+                }
             } catch (Exception e) {}
         }
         return response;

@@ -2,7 +2,7 @@ package com.hyodream.backend.global.client;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.hyodream.backend.product.dto.AiProductDetailDto;
-import com.hyodream.backend.user.dto.HealthInfoRequestDto;
+import com.hyodream.backend.product.dto.AiRecommendationRequestDto;
 import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -14,7 +14,7 @@ public interface AiClient {
 
     // 추천 시스템
     @PostMapping("/recommend-products")
-    AiRecommendResponse getRecommendations(@RequestBody HealthInfoRequestDto healthInfo);
+    AiRecommendResponse getRecommendations(@RequestBody AiRecommendationRequestDto request);
 
     // 크롤링
     @PostMapping("/crawl/product")
