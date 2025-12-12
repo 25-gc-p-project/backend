@@ -1,38 +1,66 @@
 version: '3.8'
 
 services:
-  # 1. 백엔드
-  backend:
-    build: ./backend
-    container_name: hyodream-backend
-    ports:
-      - "8080:8080"
-    environment:
-      # KST 시간 설정 및 DB 연결 시 한글/시간대 옵션 추가
-      - TZ=Asia/Seoul
-      - SPRING_DATASOURCE_URL=jdbc:mysql://mysql-db:3306/hyodream_db?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Seoul&characterEncoding=UTF-8
-      - SPRING_DATASOURCE_USERNAME=root
-      - SPRING_DATASOURCE_PASSWORD=root
-    depends_on:
-      - mysql-db
-    networks:
-      - hyodream
+  # 1. 백엔드 (Java/Spring)
+  # backend:
+  #   build: ./backend
+  #   container_name: hyodream-backend
+  #   ports:
+  #     - "8080:8080"
+  #   environment:
+  #     - TZ=Asia/Seoul
+  #     - SPRING_DATASOURCE_URL=jdbc:mysql://mysql-db:3306/hyodream_db?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Seoul&characterEncoding=UTF-8
+  #     - SPRING_DATASOURCE_USERNAME=root
+  #     - SPRING_DATASOURCE_PASSWORD=root
+  #   depends_on:
+  #     - mysql-db
+  #   networks:
+  #     - hyodream
 
-  # 2. AI 서버
+  # 2. AI 서버 (기본) - Host Port: 8000
   ai-server:
     build:
       context: ./ai-server
       dockerfile: Dockerfile
     container_name: hyodream-ai
+    env_file:
+      - .env
     ports:
-      - "8000:8000"
+      - "8000:8000" # 외부 8000 -> 내부 8000
     environment:
       - TZ=Asia/Seoul
-    command: uvicorn main:app --host 0.0.0.0 --port 8000
     networks:
       - hyodream
 
-  # 3. 데이터베이스 (MySQL)
+  # 3. AI 리뷰 서버 (Review Analysis) - Host Port: 8001
+  ai-review:
+    build:
+      context: ./ai-review
+      dockerfile: Dockerfile
+    container_name: hyodream-ai-review
+    ports:
+      - "8001:8000" # 외부 8001 -> 내부 8000 (포트 충돌 방지)
+    environment:
+      - TZ=Asia/Seoul
+    networks:
+      - hyodream
+
+  # 4. 크롤러 (Crawler/Chrome) - Host Port: 8002
+  crawler:
+    build:
+      context: ./crawler
+      dockerfile: Dockerfile
+    container_name: hyodream-crawler
+    ports:
+      - "8002:8000" # 외부 8002 -> 내부 8000 (포트 충돌 방지)
+    environment:
+      - TZ=Asia/Seoul
+    # 크롬 사용 시 공유 메모리 부족 에러 방지를 위한 설정 (필수 권장)
+    shm_size: '2gb'
+    networks:
+      - hyodream
+
+  # 5. 데이터베이스 (MySQL)
   mysql-db:
     image: mysql:8.0
     container_name: hyodream-mysql
@@ -42,7 +70,6 @@ services:
       - TZ=Asia/Seoul
       - MYSQL_ROOT_PASSWORD=root
       - MYSQL_DATABASE=hyodream_db
-    # 한글(이모지 포함) 저장을 위한 필수 명령어 추가
     command:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_unicode_ci
@@ -51,6 +78,7 @@ services:
     networks:
       - hyodream
 
+  # 6. Redis 캐시
   redis-cache:
     image: redis:alpine
     container_name: hyodream-redis
@@ -66,5 +94,3 @@ networks:
 
 volumes:
   mysql-data:
-
-

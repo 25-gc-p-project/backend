@@ -26,7 +26,16 @@ public class EventController {
     // NaverShoppingService 내부에 static 메서드가 있으므로 주입이 필수는 아니지만,
     // static import를 쓰거나 클래스명으로 바로 접근합니다.
 
-    @Operation(summary = "상품 클릭/조회 이벤트 수집", description = "사용자가 상품을 클릭하면 해당 상품의 가장 구체적인 카테고리를 자동 추출하여 실시간 관심사에 반영합니다.")
+    @Operation(summary = "상품 클릭/조회 이벤트 수집", description = """
+            사용자가 상품을 클릭하면 실시간 관심사 키워드를 추출하여 Redis에 저장합니다.
+            
+            **[관심사 키워드 추출 로직 (우선순위)]**
+            1. **매칭 성공 (정확도 최상):** 카테고리명에서 유추한 효능이 실제 상품의 효능 태그(`healthBenefits`)에 포함된 경우, 해당 효능을 저장합니다.
+               - 예: 카테고리 '루테인' -> 유추 '눈 건강' -> 상품 태그에 '눈 건강' 있음 -> **'눈 건강'** 저장
+            2. **태그 존재 시:** 매칭되는 게 없으면, 상품의 첫 번째 효능 태그를 저장합니다.
+               - 예: 태그 `['기억력 개선', '눈 건강']` -> **'기억력 개선'** 저장
+            3. **Fallback:** 위 경우에 해당하지 않으면, 가장 구체적인 **카테고리명**을 그대로 저장합니다.
+            """)
     @PostMapping("/view")
     public void logProductView(
             @Parameter(description = "상품 ID") @RequestParam Long productId,
