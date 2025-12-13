@@ -67,28 +67,41 @@ def recommend_with_gpt(req: RecommendRequest) -> List[int]:
 {{"product_ids": [ID1, ID2, ID3, ID4, ID5]}}
 """
 
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {
-                "role": "system",
-                "content": "너는 JSON만 출력하는 추천 엔진이다.",
-            },
-            {
-                "role": "user",
-                "content": prompt,
-            },
-        ],
-        temperature=0.2,  # 재현성 높이기
-    )
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "너는 JSON만 출력하는 추천 엔진이다.",
+                },
+                {
+                    "role": "user",
+                    "content": prompt,
+                },
+            ],
+            temperature=0.2,
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"OpenAI API 호출 실패: {str(e)}",
+        )
 
     try:
         content = response.choices[0].message.content
         data = json.loads(content)
 
         product_ids = data.get("product_ids")
-        if not product_ids or len(product_ids) != 5:
+
+        if not product_ids:
+            raise ValueError("product_ids 필드가 없음")
+
+        if len(product_ids) != 5:
             raise ValueError("GPT가 정확히 5개의 ID를 반환하지 않음")
+
+        if len(set(product_ids)) != 5:
+            raise ValueError("중복된 상품 ID가 반환됨")
 
         return product_ids
 
@@ -98,16 +111,31 @@ def recommend_with_gpt(req: RecommendRequest) -> List[int]:
             detail=f"GPT 응답 파싱 실패: {str(e)}",
         )
 
-
 # --------------------------------
 # API 엔드포인트
 # --------------------------------
 @app.post("/ai/recommend", response_model=RecommendResponse)
 def recommend(req: RecommendRequest):
+
+    # 1️⃣ 후보 상품 필드 자체가 없는 경우
+    if req.candidates is None:
+        raise HTTPException(
+            status_code=400,
+            detail="후보 상품(candidates)이 전달되지 않았습니다."
+        )
+
+    # 2️⃣ 후보 상품은 있지만 비어있는 경우
+    if len(req.candidates) == 0:
+        raise HTTPException(
+            status_code=400,
+            detail="후보 상품 리스트가 비어 있습니다."
+        )
+
+    # 3️⃣ 후보 상품 개수가 5개 미만인 경우
     if len(req.candidates) < 5:
         raise HTTPException(
             status_code=400,
-            detail="후보 상품은 최소 5개 이상 필요합니다.",
+            detail=f"후보 상품은 최소 5개 이상 필요합니다. (전달받은 개수: {len(req.candidates)})"
         )
 
     product_ids = recommend_with_gpt(req)

@@ -132,13 +132,15 @@ def get_product_info(url: str) -> Optional[dict]:
         url = url.replace("https://m.smartstore.naver.com", "https://smartstore.naver.com")
 
     options = uc.ChromeOptions()
+    options.add_argument('--no-sandbox')          # 샌드박스 해제 (필수)
     options.add_argument("--lang=ko-KR")
     options.add_argument("--disable-popup-blocking")
     options.add_argument("--window-size=1920,1080")
-
+    options.add_argument('--headless=new')        # 3. 화면 없는 모드 (서버 필수)
+    
     driver = None
     try:
-        driver = uc.Chrome(options=options, version_main=131)
+        driver = uc.Chrome(options=options, version_main=143)
         driver.set_page_load_timeout(30)
 
         driver.get(url)
