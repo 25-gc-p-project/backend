@@ -1,10 +1,7 @@
 package com.hyodream.backend.product.service;
 
 import com.hyodream.backend.order.repository.OrderItemRepository;
-import com.hyodream.backend.product.domain.Product;
-import com.hyodream.backend.product.domain.Review;
-import com.hyodream.backend.product.domain.ReviewRating;
-import com.hyodream.backend.product.domain.ReviewSource;
+import com.hyodream.backend.product.domain.*;
 import com.hyodream.backend.product.dto.ReviewRequestDto;
 import com.hyodream.backend.product.dto.ReviewResponseDto;
 import com.hyodream.backend.product.repository.ProductRepository;
@@ -28,16 +25,15 @@ public class ReviewService {
     private final OrderItemRepository orderItemRepository;
     private final UserService userService;
     private final ProductRepository productRepository;
+    private final ProductSyncService productSyncService;
 
     // 1. [내부] 리뷰 작성 (구매 인증 필요)
     @Transactional
     public void createReview(ReviewRequestDto dto) {
         User user = userService.getCurrentUser();
 
-        // 상품 존재 확인
-        if (!productRepository.existsById(dto.getProductId())) {
-            throw new RuntimeException("존재하지 않는 상품입니다.");
-        }
+        Product product = productRepository.findById(dto.getProductId())
+                .orElseThrow(() -> new RuntimeException("존재하지 않는 상품입니다."));
 
         // 구매 여부 확인
         if (!orderItemRepository.existsByUserIdAndProductId(user.getId(), dto.getProductId())) {
@@ -53,59 +49,23 @@ public class ReviewService {
         review.setUserId(user.getId());
         review.setProductId(dto.getProductId());
         review.setSource(ReviewSource.HYODREAM);
-        
-        // 아이디를 작성자 이름으로 저장
         review.setAuthorName(user.getUsername());
-
         review.setContent(dto.getContent());
         
-        // 평점 처리 (Score 우선)
+        // 평점 처리
+        int newScore = 5;
         if (dto.getScore() > 0) {
-            review.setScore(dto.getScore());
-            // rating은 prePersist에서 자동 설정됨
+            newScore = dto.getScore();
         } else if (dto.getRating() != null) {
-            // 구버전 호환: rating만 들어오면 임의의 점수 할당
+            newScore = (dto.getRating() == ReviewRating.GOOD ? 5 : (dto.getRating() == ReviewRating.AVERAGE ? 3 : 1));
             review.setRating(dto.getRating());
-            review.setScore(dto.getRating() == ReviewRating.GOOD ? 5 : (dto.getRating() == ReviewRating.AVERAGE ? 3 : 1));
-        } else {
-            // 기본값
-            review.setScore(5);
         }
+        review.setScore(newScore);
 
         reviewRepository.save(review);
-    }
-
-    // 2. [외부/크롤러] 리뷰 저장 (구매 인증 Skip)
-    @Transactional
-    public void saveCrawledReview(ReviewRequestDto dto) {
-        // 상품 존재 확인 (없으면 저장 불가)
-        if (!productRepository.existsById(dto.getProductId())) {
-            log.warn("Cannot save review for non-existent product ID: {}", dto.getProductId());
-            return;
-        }
-
-        // 중복 수집 방지
-        if (dto.getExternalReviewId() != null && 
-            reviewRepository.existsByExternalReviewId(dto.getExternalReviewId())) {
-            return; // 이미 저장된 리뷰
-        }
-
-        Review review = new Review();
-        review.setProductId(dto.getProductId());
-        review.setSource(ReviewSource.NAVER);
-        review.setUserId(null); // 외부 리뷰는 회원 ID 없음
-
-        review.setExternalReviewId(dto.getExternalReviewId());
-        review.setAuthorName(dto.getAuthorName()); // 마스킹된 이름
-        review.setProductOption(dto.getProductOption());
-        review.setContent(dto.getContent());
-        review.setImages(dto.getImages());
         
-        // 점수 저장
-        review.setScore(dto.getScore());
-        // rating은 prePersist에서 자동 계산
-
-        reviewRepository.save(review);
+        // 통계 업데이트 & AI 분석 트리거
+        updateProductStatsAndTriggerAnalysis(product, 1, newScore);
     }
 
     // 상품별 리뷰 조회
@@ -136,11 +96,20 @@ public class ReviewService {
             throw new RuntimeException("작성자만 수정할 수 있습니다.");
         }
 
+        int oldScore = review.getScore();
         review.setContent(dto.getContent());
+        
         if (dto.getScore() > 0) {
             review.setScore(dto.getScore());
-            // rating은 자동 업데이트가 안되므로 수동 갱신 필요할 수 있음.
-            // 여기서는 단순화를 위해 생략하거나 로직 추가 가능.
+        }
+        
+        // 점수가 바뀌었다면 통계 재계산 필요
+        if (oldScore != review.getScore()) {
+            Product product = productRepository.findById(review.getProductId()).orElse(null);
+            if (product != null) {
+                // 전체 재계산이 안전함 (증분 업데이트는 오차 누적 가능성 있음)
+                recalculateProductStats(product);
+            }
         }
     }
 
@@ -151,12 +120,19 @@ public class ReviewService {
                 .orElseThrow(() -> new RuntimeException("리뷰가 없습니다."));
         User user = userService.getCurrentUser();
 
-        // 본인 확인
         if (review.getUserId() == null || !review.getUserId().equals(user.getId())) {
             throw new RuntimeException("작성자만 삭제할 수 있습니다.");
         }
 
         reviewRepository.delete(review);
+        
+        Product product = productRepository.findById(review.getProductId()).orElse(null);
+        if (product != null) {
+             // 통계 업데이트 (감소)
+             updateProductStatsAndTriggerAnalysis(product, -1, -review.getScore());
+             // 혹은 정확성을 위해 전체 재계산
+             recalculateProductStats(product);
+        }
     }
 
     // 내가 쓴 리뷰 조회
@@ -174,5 +150,42 @@ public class ReviewService {
             dtos.add(new ReviewResponseDto(review, productName));
         }
         return dtos;
+    }
+
+    // --- Private Methods ---
+
+    private void updateProductStatsAndTriggerAnalysis(Product product, int countDelta, int scoreDelta) {
+        long currentCount = product.getReviewCount() + countDelta;
+        // countDelta가 양수일 때만 점수 합산, 삭제 시는 재계산 권장되지만 여기선 약식 구현 가능
+        // 하지만 평균 평점 관리가 복잡하므로, 안전하게 DB에서 다시 집계하는 방식을 추천.
+        // 여기서는 하이브리드로 처리: 카운트는 증감, 평점은 전체 재계산(정확도 위함)
+        
+        product.setReviewCount(Math.max(0, currentCount));
+        recalculateProductStats(product); // 평점 및 카운트 정확도 보정
+
+        // AI 재분석 트리거 (신규 리뷰가 5개 이상 쌓였을 때)
+        ReviewAnalysis analysis = product.getAnalysis();
+        int analyzedCount = (analysis != null) ? analysis.getAnalyzedReviewCount() : 0;
+        
+        if (product.getReviewCount() - analyzedCount >= 5 || analysis == null) {
+            productSyncService.analyzeProductReviews(product.getId());
+        }
+    }
+    
+    private void recalculateProductStats(Product product) {
+        // DB에서 전체 리뷰 수와 평점 평균을 다시 계산
+        // (JPA 쿼리로 하거나 Java stream 처리)
+        List<Review> allReviews = reviewRepository.findByProductId(product.getId());
+        
+        long count = allReviews.size();
+        double avg = 0.0;
+        if (count > 0) {
+            double sum = allReviews.stream().mapToInt(Review::getScore).sum();
+            avg = Math.round((sum / count) * 10.0) / 10.0; // 소수점 첫째자리 반올림
+        }
+        
+        product.setReviewCount(count);
+        product.setAverageRating(avg);
+        productRepository.save(product);
     }
 }

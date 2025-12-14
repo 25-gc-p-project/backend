@@ -8,9 +8,8 @@ import com.hyodream.backend.global.client.review.dto.ReviewAnalysisRequestDto;
 import com.hyodream.backend.global.client.review.dto.ReviewAnalysisResponseDto;
 import com.hyodream.backend.product.domain.AnalysisStatus;
 import com.hyodream.backend.product.domain.Product;
-import com.hyodream.backend.product.domain.ProductDetail;
+import com.hyodream.backend.product.domain.ReviewAnalysis;
 import com.hyodream.backend.product.domain.SearchLog;
-import com.hyodream.backend.product.dto.AiProductDetailDto;
 import com.hyodream.backend.product.dto.AiRecommendationRequestDto;
 import com.hyodream.backend.product.dto.ProductRequestDto;
 import com.hyodream.backend.product.dto.ProductResponseDto;
@@ -145,49 +144,27 @@ public class ProductService {
         return new PageImpl<>(finalDtos, pageable, productPage.getTotalElements());
     }
 
-    // [Modified] 상품 상세 조회 (비동기 크롤링 적용)
+    // [Modified] 상품 상세 조회 (비동기 AI 분석 적용)
     @Transactional(readOnly = true)
     public ProductResponseDto getProduct(Long id) {
         Product product = productRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("상품이 없습니다."));
 
-        // [Optimistic Lock Fix] 메인 스레드에서는 절대 '저장(save)'을 수행하지 않음.
-        // ProductDetail이 없더라도 여기서 생성하지 않고 비동기 서비스에 위임함.
-        // 단순히 조회만 하므로 낙관적 락 충돌이 발생하지 않음.
+        // AI 분석 상태 확인
+        // 분석 정보가 없으면 최초 1회 분석 요청 (리뷰가 없어도 COMPLETED 상태 생성을 위해 실행됨)
+        boolean needAnalysis = (product.getAnalysis() == null);
 
-        ProductDetail detailEntity = product.getDetail();
-        
-        // 1. 크롤링 갱신 체크 (마지막 갱신으로부터 3일 지났거나, 상세 정보가 아예 없는 경우)
-        boolean needUpdate = false;
-        if (detailEntity == null) {
-            needUpdate = true;
-        } else {
-            if (detailEntity.getLastCrawledAt() == null) {
-                needUpdate = true;
-            } else if (detailEntity.getLastCrawledAt().isBefore(LocalDateTime.now().minusDays(3))) {
-                needUpdate = true;
-            }
-            // 이미 진행 중이면 중복 요청 방지
-            if (detailEntity.getStatus() == AnalysisStatus.PROGRESS) {
-                needUpdate = false;
-            }
-        }
-
-        if (needUpdate && product.getItemUrl() != null && !product.getItemUrl().isEmpty()) {
-            // 2. [Async] 비동기로 데이터 갱신 요청
+        if (needAnalysis) {
             try {
-                // DB 저장을 제거하고 비동기 서비스에 위임 (낙관적 락 방지)
-                productSyncService.updateProductDetailsAsync(product.getId());
-                log.info("🚀 Triggered async product sync for ID: {}", id);
+                productSyncService.analyzeProductReviews(product.getId());
+                log.info("🚀 Triggered async review analysis for ID: {}", id);
             } catch (Exception e) {
-                log.error("Failed to trigger async sync: {}", e.getMessage());
+                log.error("Failed to trigger async analysis: {}", e.getMessage());
             }
         }
 
-        // 3. 현재 DB에 있는 데이터 즉시 반환 (단, 갱신 요청 시 DTO에는 PROGRESS로 표기)
         ProductResponseDto responseDto = new ProductResponseDto(product);
-        if (needUpdate) {
-            // detail이 없거나 갱신이 필요하면 PROGRESS 상태로 응답
+        if (needAnalysis) {
             responseDto.setAnalysisStatus(AnalysisStatus.PROGRESS);
         }
         return responseDto;
@@ -423,16 +400,27 @@ public class ProductService {
         Product product = productRepository.findById(productId)
                 .orElseThrow(() -> new RuntimeException("상품 없음"));
         product.setTotalSales(product.getTotalSales() + count);
+        // [Real-time] 인기순 정렬의 즉각적인 반응을 위해 recentSales도 함께 증가
+        product.setRecentSales(product.getRecentSales() + count);
     }
 
     @Transactional
     public void decreaseTotalSales(Long productId, int count) {
         Product product = productRepository.findById(productId)
                 .orElseThrow(() -> new RuntimeException("상품 없음"));
+        
+        // 전체 판매량 감소
         if (product.getTotalSales() >= count) {
             product.setTotalSales(product.getTotalSales() - count);
         } else {
             product.setTotalSales(0);
+        }
+
+        // [Real-time] 최근 판매량도 감소 (주문 취소 시 순위 하락 반영)
+        if (product.getRecentSales() >= count) {
+            product.setRecentSales(product.getRecentSales() - count);
+        } else {
+            product.setRecentSales(0);
         }
     }
 }

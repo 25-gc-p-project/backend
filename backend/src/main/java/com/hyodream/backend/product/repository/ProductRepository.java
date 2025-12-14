@@ -16,7 +16,7 @@ import java.util.Optional;
 public interface ProductRepository extends JpaRepository<Product, Long> {
     
     // 상세 정보 함께 조회 (N+1 방지)
-    @EntityGraph(attributePaths = {"detail"})
+    @EntityGraph(attributePaths = {"analysis"})
     Optional<Product> findById(Long id);
 
     Optional<Product> findByNaverProductId(String naverProductId);
@@ -51,7 +51,7 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
     // Sorting: 내 관심사(:interest)가 healthBenefits에 포함되면 우선순위 0 (상단), 아니면 1 (하단) ->
     // 그 뒤엔 ID 최신순
     @Query("SELECT DISTINCT p FROM Product p " +
-            "LEFT JOIN FETCH p.detail " +
+            "LEFT JOIN FETCH p.analysis " +
             "WHERE (:isLogin = false OR NOT EXISTS (SELECT 1 FROM p.allergens a WHERE a IN :userAllergies))")
     Page<Product> findAllWithPersonalization(
             @Param("isLogin") boolean isLogin,
@@ -60,7 +60,7 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
 
     // 검색어 포함 + 알러지 필터링
     @Query("SELECT DISTINCT p FROM Product p " +
-            "LEFT JOIN FETCH p.detail " +
+            "LEFT JOIN FETCH p.analysis " +
             "WHERE p.name LIKE %:keyword% " +
             "AND (:isLogin = false OR NOT EXISTS (SELECT 1 FROM p.allergens a WHERE a IN :userAllergies))")
     Page<Product> findByNameContainingWithPersonalization(
@@ -69,16 +69,18 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
             @Param("userAllergies") List<String> userAllergies,
             Pageable pageable);
 
-    // 연관 상품 추천 (함께 많이 산 상품 TOP 5)
+    // 연관 상품 추천 (함께 많이 산 상품 TOP 5, 취소된 주문 제외)
     @Query(value = """
                 SELECT p.* FROM products p
                 JOIN order_items oi_other ON p.id = oi_other.product_id
+                JOIN orders o ON oi_other.order_id = o.id
                 WHERE oi_other.order_id IN (
                     SELECT oi_target.order_id
                     FROM order_items oi_target
                     WHERE oi_target.product_id = :targetProductId
                 )
                 AND p.id != :targetProductId
+                AND o.status = 'ORDER'
                 GROUP BY p.id
                 ORDER BY COUNT(p.id) DESC
                 LIMIT 5
@@ -130,15 +132,15 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
     // [Concurrency Control] 비관적 락(Pessimistic Lock)을 이용한 단일 조회
     // SELECT ... FOR UPDATE 구문이 실행되어 다른 트랜잭션의 접근을 차단함 (줄 세우기)
     @Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
-    @Query("SELECT p FROM Product p LEFT JOIN FETCH p.detail WHERE p.id = :id")
+    @Query("SELECT p FROM Product p LEFT JOIN FETCH p.analysis WHERE p.id = :id")
     Optional<Product> findByIdWithLock(@Param("id") Long id);
 
     // [Concurrency Fix] JPA를 거치지 않고 DB 레벨에서 원자적으로 동기화 상태 선점 (Upsert)
     // 리턴값: 1 이상이면 내가 선점(Insert or Update 성공), 0이면 이미 진행 중(선점 실패)
     @org.springframework.data.jpa.repository.Modifying
     @Query(value = """
-        INSERT INTO product_details (product_id, status, review_count, average_rating, positive_ratio, negative_ratio, analyzed_review_count, original_price, discount_rate)
-        VALUES (:productId, 'PROGRESS', 0, 0.0, 0.0, 0.0, 0, 0, 0)
+        INSERT INTO review_analysis (product_id, status, positive_count, negative_count, positive_ratio, negative_ratio, analyzed_review_count, last_analyzed_at)
+        VALUES (:productId, 'PROGRESS', 0, 0, 0.0, 0.0, 0, NOW())
         ON DUPLICATE KEY UPDATE
             status = IF(status = 'PROGRESS', status, 'PROGRESS')
     """, nativeQuery = true)

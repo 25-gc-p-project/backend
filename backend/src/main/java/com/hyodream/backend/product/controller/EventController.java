@@ -14,7 +14,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.HashMap;
 import java.util.Map;
 
-@Tag(name = "Event API", description = "사용자 행동(클릭, 장바구니 등) 이벤트 수집")
+@Tag(name = "Event API", description = "사용자 행동 기반 이벤트 수집 및 실시간 관심사 분석")
 @RestController
 @RequestMapping("/api/events")
 @RequiredArgsConstructor
@@ -27,14 +27,19 @@ public class EventController {
     // static import를 쓰거나 클래스명으로 바로 접근합니다.
 
     @Operation(summary = "상품 클릭/조회 이벤트 수집", description = """
-            사용자가 상품을 클릭하면 실시간 관심사 키워드를 추출하여 Redis에 저장합니다.
+            사용자가 상품을 조회하거나 장바구니에 담는 등의 행동을 수집합니다.
+            수집된 데이터는 Redis Stream으로 전송되어 실시간 관심사 분석(Real-time Recommendation)에 사용됩니다.
             
             **[관심사 키워드 추출 로직 (우선순위)]**
-            1. **매칭 성공 (정확도 최상):** 카테고리명에서 유추한 효능이 실제 상품의 효능 태그(`healthBenefits`)에 포함된 경우, 해당 효능을 저장합니다.
-               - 예: 카테고리 '루테인' -> 유추 '눈 건강' -> 상품 태그에 '눈 건강' 있음 -> **'눈 건강'** 저장
-            2. **태그 존재 시:** 매칭되는 게 없으면, 상품의 첫 번째 효능 태그를 저장합니다.
-               - 예: 태그 `['기억력 개선', '눈 건강']` -> **'기억력 개선'** 저장
-            3. **Fallback:** 위 경우에 해당하지 않으면, 가장 구체적인 **카테고리명**을 그대로 저장합니다.
+            1. **매칭 성공 (정확도 최상):** 상품의 카테고리명에서 유추한 효능이 실제 상품의 `healthBenefits` 태그에 포함된 경우.
+               - 예: 카테고리 '루테인' -> 유추 '눈 건강' -> 상품 태그에 '눈 건강' 있음 -> **'눈 건강'** 추출
+            2. **태그 존재 시:** 매칭되는 게 없으면, 상품의 첫 번째 효능 태그를 사용.
+               - 예: 태그 `['기억력 개선', '눈 건강']` -> **'기억력 개선'** 추출
+            3. **Fallback:** 위 경우에 해당하지 않으면, 가장 구체적인 **카테고리명**을 그대로 사용.
+            
+            **[Redis 저장 및 점수]**
+            - 추출된 키워드는 Redis ZSet(`interest:user:{id}`)에 점수로 누적됩니다.
+            - 이벤트 타입별 가중치: `CLICK(1.0)`, `LONG_VIEW(2.0)`, `CART(5.0)`, `ORDER(10.0)`
             """)
     @PostMapping("/view")
     public void logProductView(

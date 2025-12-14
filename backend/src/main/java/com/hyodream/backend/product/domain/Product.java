@@ -52,9 +52,13 @@ public class Product extends BaseTimeEntity {
     private int totalSales = 0;
     private int recentSales = 0; 
     
-    // 상세 정보와 1:1 매핑 (필요할 때만 로딩, Optional)
+    // 리뷰 통계 (성능 최적화를 위해 역정규화)
+    private long reviewCount = 0;
+    private double averageRating = 0.0;
+
+    // AI 분석 정보 (1:1 매핑)
     @OneToOne(mappedBy = "product", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
-    private ProductDetail detail;
+    private ReviewAnalysis analysis;
 
     // 태그 정보 (유지)
     @ElementCollection(fetch = FetchType.EAGER)

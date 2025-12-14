@@ -2,7 +2,7 @@ package com.hyodream.backend.product.dto;
 
 import com.hyodream.backend.product.domain.AnalysisStatus;
 import com.hyodream.backend.product.domain.Product;
-import com.hyodream.backend.product.domain.ProductDetail;
+import com.hyodream.backend.product.domain.ReviewAnalysis;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Getter;
 import java.util.List;
@@ -44,15 +44,6 @@ public class ProductResponseDto {
     private String category4;
     
     // --- [Detail Info] ---
-    @Schema(description = "원가", example = "20000")
-    private int originalPrice;
-    
-    @Schema(description = "할인율", example = "20")
-    private int discountRate;
-    
-    @Schema(description = "판매처", example = "종근당건강")
-    private String seller;
-    
     @Schema(description = "리뷰 수", example = "150")
     private long reviewCount;
     
@@ -103,18 +94,14 @@ public class ProductResponseDto {
         this.healthBenefits = product.getHealthBenefits();
         this.allergens = product.getAllergens();
         
-        if (product.getDetail() != null) {
-            ProductDetail d = product.getDetail();
-            this.originalPrice = d.getOriginalPrice();
-            this.discountRate = d.getDiscountRate();
-            this.seller = d.getSeller();
-            this.reviewCount = d.getReviewCount();
-            this.averageRating = d.getAverageRating();
-            
-            // 감성 분석 결과 매핑
-            this.positiveRatio = d.getPositiveRatio();
-            this.negativeRatio = d.getNegativeRatio();
-            this.analysisStatus = d.getStatus();
+        this.reviewCount = product.getReviewCount();
+        this.averageRating = product.getAverageRating();
+
+        if (product.getAnalysis() != null) {
+            ReviewAnalysis a = product.getAnalysis();
+            this.positiveRatio = a.getPositiveRatio();
+            this.negativeRatio = a.getNegativeRatio();
+            this.analysisStatus = a.getStatus();
         } else {
             this.analysisStatus = AnalysisStatus.NONE;
         }

@@ -12,7 +12,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
-@Tag(name = "Cart API", description = "장바구니 관리")
+@Tag(name = "Cart API", description = "장바구니 관리 API")
 @RestController
 @RequestMapping("/api/carts")
 @RequiredArgsConstructor
@@ -20,23 +20,31 @@ public class CartController {
 
     private final CartService cartService;
 
-    @Operation(summary = "장바구니 담기", description = "상품을 장바구니에 추가합니다. (로그인 필수)")
+    @Operation(summary = "장바구니 담기", description = """
+            상품을 장바구니에 추가합니다. (로그인 필수)
+            
+            **[로직]**
+            - 이미 장바구니에 담긴 상품이라면 수량(`count`)만 증가시킵니다.
+            - 없는 상품이라면 새로 추가합니다.
+            """)
     @PostMapping
     public ResponseEntity<String> addCart(@RequestBody OrderRequestDto dto) {
         cartService.addCart(dto);
         return ResponseEntity.ok("장바구니에 담겼습니다.");
     }
 
-    @Operation(summary = "내 장바구니 조회", description = "로그인한 사용자의 장바구니 목록을 조회합니다.")
+    @Operation(summary = "내 장바구니 조회", description = """
+            현재 로그인한 사용자의 장바구니 목록 전체를 조회합니다.
+            """)
     @GetMapping
     public ResponseEntity<List<Cart>> getMyCart() {
         return ResponseEntity.ok(cartService.getMyCart());
     }
 
-    @Operation(summary = "장바구니 항목 삭제", description = "장바구니 ID로 특정 항목을 삭제합니다.")
+    @Operation(summary = "장바구니 항목 삭제", description = "장바구니 ID(`cartId`)를 이용하여 특정 항목을 삭제합니다.")
     @DeleteMapping("/{cartId}")
     public ResponseEntity<String> deleteCart(
-            @Parameter(description = "장바구니 ID") @PathVariable Long cartId) {
+            @Parameter(description = "삭제할 장바구니 항목의 ID (상품 ID 아님)") @PathVariable Long cartId) {
         cartService.deleteCart(cartId);
         return ResponseEntity.ok("삭제되었습니다.");
     }
