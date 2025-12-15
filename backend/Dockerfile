@@ -1,6 +1,6 @@
 # 1. 빌드 단계 (Builder)
 # build.gradle에 Java 21로 설정되어 있으므로 openjdk:21 사용
-FROM openjdk:21-jdk-slim AS builder
+FROM eclipse-temurin:21-jdk AS builder
 WORKDIR /app
 
 # Gradle 캐싱을 위해 설정 파일들만 먼저 복사
@@ -20,7 +20,7 @@ RUN ./gradlew bootJar -x test
 
 # 2. 실행 단계 (Runtime)
 # 실행 환경도 Java 21 필수
-FROM openjdk:21-jdk-slim
+FROM eclipse-temurin:21-jdk
 WORKDIR /app
 
 # 빌드 단계에서 생성된 JAR 파일 복사
